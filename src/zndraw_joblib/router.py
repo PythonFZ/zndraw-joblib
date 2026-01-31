@@ -1,5 +1,5 @@
 # src/zndraw_joblib/router.py
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
@@ -33,6 +33,7 @@ from zndraw_joblib.schemas import (
     TaskClaimResponse,
     TaskUpdateRequest,
 )
+from zndraw_joblib.settings import JobLibSettings
 
 # Valid status transitions
 VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
@@ -45,7 +46,6 @@ VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
 }
 
 TERMINAL_STATES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
-from zndraw_joblib.settings import JobLibSettings
 
 router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
 
@@ -394,7 +394,7 @@ async def update_task_status(
 
     # Update status
     task.status = request.status
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     if request.status == TaskStatus.RUNNING:
         task.started_at = now
@@ -425,3 +425,47 @@ async def update_task_status(
         error=task.error,
         payload=task.payload,
     )
+
+
+class WorkerResponse(PydanticBaseModel):
+    id: str
+    last_heartbeat: datetime
+
+
+@router.patch("/workers/{worker_id}", response_model=WorkerResponse)
+async def worker_heartbeat(
+    worker_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """Update worker heartbeat timestamp."""
+    worker = db.exec(select(Worker).where(Worker.id == worker_id)).first()
+    if not worker:
+        raise WorkerNotFound.exception(detail=f"Worker '{worker_id}' not found")
+
+    worker.last_heartbeat = datetime.utcnow()
+    db.add(worker)
+    db.commit()
+    db.refresh(worker)
+
+    return WorkerResponse(id=worker.id, last_heartbeat=worker.last_heartbeat)
+
+
+@router.delete("/workers/{worker_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_worker(
+    worker_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """Delete worker and all job links."""
+    worker = db.exec(select(Worker).where(Worker.id == worker_id)).first()
+    if not worker:
+        raise WorkerNotFound.exception(detail=f"Worker '{worker_id}' not found")
+
+    # Delete all links first
+    links = db.exec(
+        select(WorkerJobLink).where(WorkerJobLink.worker_id == worker_id)
+    ).all()
+    for link in links:
+        db.delete(link)
+
+    db.delete(worker)
+    db.commit()
