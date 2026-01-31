@@ -100,7 +100,8 @@ def test_update_task_running_to_failed(seeded_client):
     assert data.completed_at is not None
 
 
-def test_update_task_invalid_transition(seeded_client):
+def test_update_task_invalid_transition_claimed_to_completed(seeded_client):
+    """Cannot skip running and go directly to completed."""
     seeded_client.post(
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {}},
@@ -109,10 +110,92 @@ def test_update_task_invalid_transition(seeded_client):
     claim_data = TaskClaimResponse.model_validate(claim_resp.json())
     task_id = str(claim_data.task.id)
 
-    # Try to go from claimed directly to completed (invalid)
     response = seeded_client.patch(
         f"/v1/joblib/tasks/{task_id}",
         json={"status": "completed"},
+    )
+    assert response.status_code == 409
+    error = ProblemDetail.model_validate(response.json())
+    assert error.status == 409
+
+
+def test_update_task_invalid_transition_running_to_pending(seeded_client):
+    """Cannot go backwards from running to pending."""
+    seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    claim_resp = seeded_client.post("/v1/joblib/tasks/claim")
+    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
+    task_id = str(claim_data.task.id)
+
+    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
+    response = seeded_client.patch(
+        f"/v1/joblib/tasks/{task_id}",
+        json={"status": "pending"},
+    )
+    assert response.status_code == 409
+    error = ProblemDetail.model_validate(response.json())
+    assert error.status == 409
+
+
+def test_update_task_invalid_transition_completed_to_failed(seeded_client):
+    """Cannot transition from completed to failed."""
+    seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    claim_resp = seeded_client.post("/v1/joblib/tasks/claim")
+    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
+    task_id = str(claim_data.task.id)
+
+    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
+    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "completed"})
+    response = seeded_client.patch(
+        f"/v1/joblib/tasks/{task_id}",
+        json={"status": "failed"},
+    )
+    assert response.status_code == 409
+    error = ProblemDetail.model_validate(response.json())
+    assert error.status == 409
+
+
+def test_update_task_invalid_transition_completed_to_running(seeded_client):
+    """Cannot go backwards from completed to running."""
+    seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    claim_resp = seeded_client.post("/v1/joblib/tasks/claim")
+    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
+    task_id = str(claim_data.task.id)
+
+    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
+    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "completed"})
+    response = seeded_client.patch(
+        f"/v1/joblib/tasks/{task_id}",
+        json={"status": "running"},
+    )
+    assert response.status_code == 409
+    error = ProblemDetail.model_validate(response.json())
+    assert error.status == 409
+
+
+def test_update_task_invalid_transition_failed_to_running(seeded_client):
+    """Cannot go backwards from failed to running."""
+    seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    claim_resp = seeded_client.post("/v1/joblib/tasks/claim")
+    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
+    task_id = str(claim_data.task.id)
+
+    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
+    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "failed"})
+    response = seeded_client.patch(
+        f"/v1/joblib/tasks/{task_id}",
+        json={"status": "running"},
     )
     assert response.status_code == 409
     error = ProblemDetail.model_validate(response.json())
