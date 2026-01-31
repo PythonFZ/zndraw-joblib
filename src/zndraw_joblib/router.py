@@ -163,10 +163,15 @@ async def list_jobs(
     validate_room_id(room_id)
 
     if room_id == "@global":
-        jobs = db.exec(select(Job).where(Job.room_id == "@global")).all()
+        jobs = db.exec(
+            select(Job).where(Job.room_id == "@global", Job.deleted == False)
+        ).all()
     else:
         jobs = db.exec(
-            select(Job).where((Job.room_id == "@global") | (Job.room_id == room_id))
+            select(Job).where(
+                (Job.room_id == "@global") | (Job.room_id == room_id),
+                Job.deleted == False,
+            )
         ).all()
 
     result = []
@@ -213,7 +218,7 @@ async def get_job(
         )
     ).first()
 
-    if not job:
+    if not job or job.deleted:
         raise JobNotFound.exception(detail=f"Job '{job_name}' not found")
 
     worker_count = len(
@@ -263,7 +268,7 @@ async def submit_task(
         )
     ).first()
 
-    if not job:
+    if not job or job.deleted:
         raise JobNotFound.exception(detail=f"Job '{job_name}' not found")
 
     # For private jobs, ensure room matches
@@ -412,6 +417,46 @@ async def update_task_status(
         channel = f"zndraw_joblib:task:{task_id}"
         await redis.publish(channel, request.status.value)
 
+        # Check for orphan job cleanup (no workers and no non-terminal tasks)
+        job_id = task.job_id
+        remaining_workers = db.exec(
+            select(WorkerJobLink).where(WorkerJobLink.job_id == job_id)
+        ).first()
+
+        if not remaining_workers:
+            # No workers - check if any non-terminal tasks remain
+            non_terminal_statuses = {TaskStatus.PENDING, TaskStatus.CLAIMED, TaskStatus.RUNNING}
+            non_terminal_task = db.exec(
+                select(Task).where(
+                    Task.job_id == job_id,
+                    Task.status.in_(non_terminal_statuses),
+                )
+            ).first()
+
+            if not non_terminal_task:
+                # Job is orphan - delete all tasks then the job
+                all_tasks = db.exec(select(Task).where(Task.job_id == job_id)).all()
+                for t in all_tasks:
+                    db.delete(t)
+
+                job_to_delete = db.exec(select(Job).where(Job.id == job_id)).first()
+                if job_to_delete:
+                    db.delete(job_to_delete)
+                db.commit()
+
+                # Return response for the deleted task
+                return TaskResponse(
+                    id=task.id,
+                    job_name="",
+                    room_id=task.room_id,
+                    status=task.status,
+                    created_at=task.created_at,
+                    started_at=task.started_at,
+                    completed_at=task.completed_at,
+                    error=task.error,
+                    payload=task.payload,
+                )
+
     job = db.exec(select(Job).where(Job.id == task.job_id)).first()
 
     return TaskResponse(
@@ -455,17 +500,64 @@ async def delete_worker(
     worker_id: str,
     db: Session = Depends(get_db_session),
 ):
-    """Delete worker and all job links."""
+    """Delete worker, fail their tasks, remove job links, and clean up orphan jobs."""
     worker = db.exec(select(Worker).where(Worker.id == worker_id)).first()
     if not worker:
         raise WorkerNotFound.exception(detail=f"Worker '{worker_id}' not found")
 
-    # Delete all links first
+    # Fail any claimed/running tasks owned by this worker
+    worker_tasks = db.exec(
+        select(Task).where(
+            Task.worker_id == worker_id,
+            Task.status.in_({TaskStatus.CLAIMED, TaskStatus.RUNNING}),
+        )
+    ).all()
+    now = datetime.now(timezone.utc)
+    for task in worker_tasks:
+        task.status = TaskStatus.FAILED
+        task.completed_at = now
+        task.error = "Worker disconnected"
+        db.add(task)
+
+    # Get job IDs this worker is linked to before deleting links
     links = db.exec(
         select(WorkerJobLink).where(WorkerJobLink.worker_id == worker_id)
     ).all()
+    job_ids = [link.job_id for link in links]
+
+    # Delete all links
     for link in links:
         db.delete(link)
 
+    # Delete worker
     db.delete(worker)
+    db.flush()
+
+    # Clean up orphan jobs (no workers and no non-terminal tasks)
+    # Note: Tasks are kept as historical records even when job is deleted
+    non_terminal_statuses = {TaskStatus.PENDING, TaskStatus.CLAIMED, TaskStatus.RUNNING}
+    for job_id in job_ids:
+        # Check if job has any remaining workers
+        remaining_workers = db.exec(
+            select(WorkerJobLink).where(WorkerJobLink.job_id == job_id)
+        ).first()
+        if remaining_workers:
+            continue  # Job still has workers
+
+        # Check if job has any non-terminal tasks
+        non_terminal_task = db.exec(
+            select(Task).where(
+                Task.job_id == job_id,
+                Task.status.in_(non_terminal_statuses),
+            )
+        ).first()
+        if non_terminal_task:
+            continue  # Job has pending/running tasks
+
+        # Job is orphan - soft delete (tasks remain as historical records)
+        job = db.exec(select(Job).where(Job.id == job_id)).first()
+        if job:
+            job.deleted = True
+            db.add(job)
+
     db.commit()

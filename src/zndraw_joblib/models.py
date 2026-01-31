@@ -41,6 +41,7 @@ class Job(SQLModel, table=True):
     schema_: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column("schema", JSON)
     )
+    deleted: bool = Field(default=False, index=True)
 
     # Relationships
     tasks: list["Task"] = Relationship(back_populates="job")
