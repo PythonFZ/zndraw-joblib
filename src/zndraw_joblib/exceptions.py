@@ -1,0 +1,160 @@
+# src/zndraw_joblib/exceptions.py
+"""RFC 9457 Problem Details for HTTP APIs."""
+
+import re
+from typing import Any, ClassVar
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+
+def _camel_to_kebab(name: str) -> str:
+    """Convert CamelCase to kebab-case."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", name).lower()
+
+
+class ProblemDetail(BaseModel):
+    """RFC 9457 Problem Details."""
+
+    type: str = "about:blank"
+    title: str
+    status: int
+    detail: str | None = None
+    instance: str | None = None
+
+
+class ProblemException(Exception):
+    """Exception that carries a ProblemDetail for RFC 9457 responses."""
+
+    def __init__(
+        self,
+        problem: ProblemDetail,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.problem = problem
+        self.headers = headers
+        super().__init__(problem.title)
+
+
+class ProblemType:
+    """Base class for defining problem types with documentation."""
+
+    title: ClassVar[str]
+    status: ClassVar[int]
+
+    @classmethod
+    def problem_id(cls) -> str:
+        """Return kebab-case identifier derived from class name."""
+        return _camel_to_kebab(cls.__name__)
+
+    @classmethod
+    def type_uri(cls) -> str:
+        """Return the full type URI for this problem."""
+        return f"/v1/problems/{cls.problem_id()}"
+
+    @classmethod
+    def openapi_response(
+        cls, description: str | None = None
+    ) -> dict[int | str, dict[str, Any]]:
+        """Generate OpenAPI response entry for this problem type."""
+        return {
+            cls.status: {
+                "model": ProblemDetail,
+                "description": description
+                or (cls.__doc__.split("\n")[0] if cls.__doc__ else cls.title),
+            }
+        }
+
+    @classmethod
+    def create(
+        cls, detail: str | None = None, instance: str | None = None
+    ) -> ProblemDetail:
+        """Create a ProblemDetail instance from this type."""
+        return ProblemDetail(
+            type=cls.type_uri(),
+            title=cls.title,
+            status=cls.status,
+            detail=detail,
+            instance=instance,
+        )
+
+    @classmethod
+    def exception(
+        cls,
+        detail: str | None = None,
+        instance: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> ProblemException:
+        """Create a ProblemException from this type."""
+        return ProblemException(cls.create(detail, instance), headers=headers)
+
+
+async def problem_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+    """Convert ProblemException to RFC 9457 compliant JSON response."""
+    assert isinstance(exc, ProblemException)
+    return JSONResponse(
+        status_code=exc.problem.status,
+        content=exc.problem.model_dump(exclude_none=True),
+        media_type="application/problem+json",
+        headers=exc.headers,
+    )
+
+
+# Problem Types
+
+
+class JobNotFound(ProblemType):
+    """The requested job does not exist."""
+
+    title: ClassVar[str] = "Not Found"
+    status: ClassVar[int] = 404
+
+
+class SchemaConflict(ProblemType):
+    """Job schema differs from existing registration."""
+
+    title: ClassVar[str] = "Conflict"
+    status: ClassVar[int] = 409
+
+
+class InvalidCategory(ProblemType):
+    """Job category is not in the allowed list."""
+
+    title: ClassVar[str] = "Bad Request"
+    status: ClassVar[int] = 400
+
+
+class WorkerNotFound(ProblemType):
+    """The requested worker does not exist."""
+
+    title: ClassVar[str] = "Not Found"
+    status: ClassVar[int] = 404
+
+
+class TaskNotFound(ProblemType):
+    """The requested task does not exist."""
+
+    title: ClassVar[str] = "Not Found"
+    status: ClassVar[int] = 404
+
+
+class InvalidTaskTransition(ProblemType):
+    """Invalid task status transition."""
+
+    title: ClassVar[str] = "Conflict"
+    status: ClassVar[int] = 409
+
+
+class InvalidRoomId(ProblemType):
+    """Room ID contains invalid characters (@ or :)."""
+
+    title: ClassVar[str] = "Bad Request"
+    status: ClassVar[int] = 400
+
+
+class Forbidden(ProblemType):
+    """Admin privileges required for this operation."""
+
+    title: ClassVar[str] = "Forbidden"
+    status: ClassVar[int] = 403
