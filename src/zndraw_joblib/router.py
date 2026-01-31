@@ -24,7 +24,7 @@ from zndraw_joblib.exceptions import (
     InvalidTaskTransition,
 )
 from zndraw_joblib.models import Job, Worker, WorkerJobLink, Task, TaskStatus
-from zndraw_joblib.schemas import JobRegisterRequest, JobResponse
+from zndraw_joblib.schemas import JobRegisterRequest, JobResponse, JobSummary
 from zndraw_joblib.settings import JobLibSettings
 
 router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
@@ -119,6 +119,83 @@ async def register_job(
     db.refresh(job)
 
     # Count workers for this job
+    worker_count = len(
+        db.exec(select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)).all()
+    )
+
+    return JobResponse(
+        id=job.id,
+        room_id=job.room_id,
+        category=job.category,
+        name=job.name,
+        full_name=job.full_name,
+        schema=job.schema_,
+        worker_count=worker_count,
+    )
+
+
+@router.get("/rooms/{room_id}/jobs", response_model=list[JobSummary])
+async def list_jobs(
+    room_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """List jobs for a room. Includes @global jobs unless room_id is @global."""
+    validate_room_id(room_id)
+
+    if room_id == "@global":
+        jobs = db.exec(select(Job).where(Job.room_id == "@global")).all()
+    else:
+        jobs = db.exec(
+            select(Job).where((Job.room_id == "@global") | (Job.room_id == room_id))
+        ).all()
+
+    result = []
+    for job in jobs:
+        worker_count = len(
+            db.exec(select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)).all()
+        )
+        result.append(
+            JobSummary(
+                full_name=job.full_name,
+                category=job.category,
+                name=job.name,
+                worker_count=worker_count,
+            )
+        )
+    return result
+
+
+@router.get("/rooms/{room_id}/jobs/{job_name:path}", response_model=JobResponse)
+async def get_job(
+    room_id: str,
+    job_name: str,
+    db: Session = Depends(get_db_session),
+):
+    """Get job details by full name."""
+    validate_room_id(room_id)
+
+    # Parse job_name: room_id:category:name
+    parts = job_name.split(":", 2)
+    if len(parts) != 3:
+        raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
+
+    job_room_id, category, name = parts
+
+    # For room requests, allow access to both @global and room-specific jobs
+    if room_id != "@global" and job_room_id not in ("@global", room_id):
+        raise JobNotFound.exception(detail=f"Job '{job_name}' not accessible from room '{room_id}'")
+
+    job = db.exec(
+        select(Job).where(
+            Job.room_id == job_room_id,
+            Job.category == category,
+            Job.name == name,
+        )
+    ).first()
+
+    if not job:
+        raise JobNotFound.exception(detail=f"Job '{job_name}' not found")
+
     worker_count = len(
         db.exec(select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)).all()
     )
