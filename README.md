@@ -25,6 +25,27 @@ app.dependency_overrides[get_redis_client] = my_real_redis
 app.include_router(queue_router)
 ```
 
+## JWT / Authentication
+
+The package uses **dependency injection passthrough** for authentication. It defines placeholder dependencies that your app must override:
+
+```python
+from zndraw_joblib.dependencies import get_current_user_id, get_is_admin
+
+# Your app's implementation
+async def my_get_current_user_id(
+    token: str = Depends(oauth2_scheme)
+) -> int: ...
+
+async def my_get_is_admin(
+    token: str = Depends(oauth2_scheme)
+) -> bool: ...
+
+# Inject your auth
+app.dependency_overrides[get_current_user_id] = my_get_current_user_id
+app.dependency_overrides[get_is_admin] = my_get_is_admin
+```
+
 Also make sure to import the SQLModels inside your `models.py` 
 
 ```py
@@ -66,7 +87,6 @@ class TaskStatus(str, Enum):
 
 class Job(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("name", "room_id", name="unique_job_per_room"),)
-    
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     name: str = Field(index=True)      # e.g., "send_email"
     room_id: str = Field(index=True)   # "@global" or "room_123"
