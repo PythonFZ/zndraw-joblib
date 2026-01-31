@@ -1,14 +1,39 @@
-# queue_package/router.py
-from fastapi import APIRouter, Depends
-from .dependencies import get_db_session, get_redis_client
-from .models import Task
+# src/zndraw_joblib/router.py
+from datetime import datetime
+from uuid import UUID
 
-queue_router = APIRouter(prefix="/tasks", tags=["Queue"])
+from fastapi import APIRouter, Depends, Response, status
+from pydantic import BaseModel as PydanticBaseModel
+from sqlmodel import Session, select
 
-@queue_router.post("/claim")
-async def claim_task(
-    db = Depends(get_db_session),      # Uses the stub
-    redis = Depends(get_redis_client)  # Uses the stub
-):
-    # Logic here...
-    return {"status": "ok"}
+from zndraw_joblib.dependencies import (
+    get_db_session,
+    get_current_identity,
+    get_is_admin,
+    get_redis_client,
+    get_settings,
+)
+from zndraw_joblib.exceptions import (
+    InvalidCategory,
+    InvalidRoomId,
+    SchemaConflict,
+    Forbidden,
+    JobNotFound,
+    WorkerNotFound,
+    TaskNotFound,
+    InvalidTaskTransition,
+)
+from zndraw_joblib.models import Job, Worker, WorkerJobLink, Task, TaskStatus
+from zndraw_joblib.settings import JobLibSettings
+
+router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
+
+
+def validate_room_id(room_id: str) -> None:
+    """Validate room_id doesn't contain @ or : (except @global)."""
+    if room_id == "@global":
+        return
+    if "@" in room_id or ":" in room_id:
+        raise InvalidRoomId.exception(
+            detail=f"Room ID '{room_id}' contains invalid characters (@ or :)"
+        )
