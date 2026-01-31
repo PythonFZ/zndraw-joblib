@@ -13,6 +13,7 @@ from zndraw_joblib.dependencies import (
     get_is_admin,
     get_redis_client,
 )
+from zndraw_joblib.exceptions import ProblemException, problem_exception_handler
 
 
 # Configure pytest-asyncio
@@ -97,6 +98,7 @@ def app(db_session, mock_identity_factory, mock_is_admin, mock_redis):
     """Create a FastAPI app with dependency overrides."""
     app = FastAPI()
     app.include_router(router)
+    app.add_exception_handler(ProblemException, problem_exception_handler)
     app.dependency_overrides[get_db_session] = db_session
     app.dependency_overrides[get_current_identity] = mock_identity_factory
     app.dependency_overrides[get_is_admin] = mock_is_admin
