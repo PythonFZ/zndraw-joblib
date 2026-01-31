@@ -1,6 +1,7 @@
 # tests/test_router_jobs.py
 """Tests for job registration endpoint using shared fixtures from conftest.py."""
-import pytest
+from zndraw_joblib.schemas import JobResponse
+from zndraw_joblib.exceptions import ProblemDetail
 
 
 def test_register_job_global(client):
@@ -9,10 +10,9 @@ def test_register_job_global(client):
         json={"category": "modifiers", "name": "Rotate", "schema": {"angle": 0}},
     )
     assert response.status_code == 201
-    data = response.json()
-    # TODO: use pydantic model to validate response
-    assert data["full_name"] == "@global:modifiers:Rotate"
-    assert data["worker_count"] == 1
+    data = JobResponse.model_validate(response.json())
+    assert data.full_name == "@global:modifiers:Rotate"
+    assert data.worker_count == 1
 
 
 def test_register_job_private(client):
@@ -21,9 +21,8 @@ def test_register_job_private(client):
         json={"category": "selections", "name": "All", "schema": {}},
     )
     assert response.status_code == 201
-    data = response.json()
-    # TODO: use pydantic model to validate response
-    assert data["full_name"] == "room_123:selections:All"
+    data = JobResponse.model_validate(response.json())
+    assert data.full_name == "room_123:selections:All"
 
 
 def test_register_job_invalid_category(client):
@@ -32,6 +31,8 @@ def test_register_job_invalid_category(client):
         json={"category": "invalid_cat", "name": "Rotate", "schema": {}},
     )
     assert response.status_code == 400
+    error = ProblemDetail.model_validate(response.json())
+    assert error.status == 400
 
 
 def test_register_job_schema_conflict(client):
@@ -46,6 +47,8 @@ def test_register_job_schema_conflict(client):
         json={"category": "modifiers", "name": "Rotate", "schema": {"angle": 0, "axis": "z"}},
     )
     assert response.status_code == 409
+    error = ProblemDetail.model_validate(response.json())
+    assert error.status == 409
 
 
 def test_register_job_same_schema_idempotent(client):
@@ -61,6 +64,8 @@ def test_register_job_same_schema_idempotent(client):
         json={"category": "modifiers", "name": "Rotate", "schema": schema},
     )
     assert response.status_code == 200  # OK, not 201
+    data = JobResponse.model_validate(response.json())
+    assert data.full_name == "@global:modifiers:Rotate"
 
 
 def test_register_job_invalid_room_id_with_at(client):
@@ -69,6 +74,8 @@ def test_register_job_invalid_room_id_with_at(client):
         json={"category": "modifiers", "name": "Rotate", "schema": {}},
     )
     assert response.status_code == 400
+    error = ProblemDetail.model_validate(response.json())
+    assert error.status == 400
 
 
 def test_register_job_invalid_room_id_with_colon(client):
@@ -77,3 +84,5 @@ def test_register_job_invalid_room_id_with_colon(client):
         json={"category": "modifiers", "name": "Rotate", "schema": {}},
     )
     assert response.status_code == 400
+    error = ProblemDetail.model_validate(response.json())
+    assert error.status == 400
