@@ -30,6 +30,7 @@ from zndraw_joblib.schemas import (
     JobSummary,
     TaskSubmitRequest,
     TaskResponse,
+    TaskClaimResponse,
 )
 from zndraw_joblib.settings import JobLibSettings
 
@@ -281,4 +282,55 @@ async def submit_task(
         status=task.status,
         created_at=task.created_at,
         payload=task.payload,
+    )
+
+
+@router.post("/tasks/claim", response_model=TaskClaimResponse)
+async def claim_task(
+    db: Session = Depends(get_db_session),
+    identity: str = Depends(get_current_identity),
+):
+    """Claim the oldest pending task for jobs the worker is registered for."""
+    # Find oldest pending task for jobs this worker is registered for
+    # Using subquery to get job IDs worker is registered for
+    worker_job_ids = db.exec(
+        select(WorkerJobLink.job_id).where(WorkerJobLink.worker_id == identity)
+    ).all()
+
+    if not worker_job_ids:
+        return TaskClaimResponse(task=None)
+
+    # Find oldest pending task
+    task = db.exec(
+        select(Task)
+        .where(Task.job_id.in_(worker_job_ids), Task.status == TaskStatus.PENDING)
+        .order_by(Task.created_at.asc())
+        .limit(1)
+    ).first()
+
+    if not task:
+        return TaskClaimResponse(task=None)
+
+    # Claim the task
+    task.status = TaskStatus.CLAIMED
+    task.worker_id = identity
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    # Get job for full name
+    job = db.exec(select(Job).where(Job.id == task.job_id)).first()
+
+    return TaskClaimResponse(
+        task=TaskResponse(
+            id=task.id,
+            job_name=job.full_name if job else "",
+            room_id=task.room_id,
+            status=task.status,
+            created_at=task.created_at,
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+            error=task.error,
+            payload=task.payload,
+        )
     )
