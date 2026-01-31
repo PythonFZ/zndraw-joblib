@@ -1,0 +1,74 @@
+# tests/test_schemas.py
+import pytest
+from datetime import datetime
+from uuid import UUID
+
+from zndraw_joblib.schemas import (
+    JobRegisterRequest,
+    JobResponse,
+    TaskSubmitRequest,
+    TaskResponse,
+    TaskClaimResponse,
+    TaskUpdateRequest,
+)
+from zndraw_joblib.models import TaskStatus
+
+
+def test_job_register_request():
+    req = JobRegisterRequest(category="modifiers", name="Rotate", schema={"angle": 0})
+    assert req.category == "modifiers"
+    assert req.name == "Rotate"
+    assert req.schema == {"angle": 0}
+
+
+def test_job_response():
+    resp = JobResponse(
+        id=UUID("12345678-1234-5678-1234-567812345678"),
+        room_id="@global",
+        category="modifiers",
+        name="Rotate",
+        full_name="@global:modifiers:Rotate",
+        schema={"angle": 0},
+        worker_count=2,
+    )
+    assert resp.full_name == "@global:modifiers:Rotate"
+    assert resp.worker_count == 2
+
+
+def test_task_submit_request():
+    req = TaskSubmitRequest(payload={"angle": 90})
+    assert req.payload == {"angle": 90}
+
+
+def test_task_response():
+    resp = TaskResponse(
+        id=UUID("12345678-1234-5678-1234-567812345678"),
+        job_name="@global:modifiers:Rotate",
+        room_id="room_1",
+        status=TaskStatus.PENDING,
+        created_at=datetime.utcnow(),
+    )
+    assert resp.status == TaskStatus.PENDING
+
+
+def test_task_update_request_valid_status():
+    req = TaskUpdateRequest(status=TaskStatus.RUNNING)
+    assert req.status == TaskStatus.RUNNING
+
+
+def test_task_claim_response_with_task():
+    resp = TaskClaimResponse(
+        task=TaskResponse(
+            id=UUID("12345678-1234-5678-1234-567812345678"),
+            job_name="@global:modifiers:Rotate",
+            room_id="room_1",
+            status=TaskStatus.CLAIMED,
+            created_at=datetime.utcnow(),
+        )
+    )
+    assert resp.task is not None
+
+
+def test_task_claim_response_empty():
+    resp = TaskClaimResponse(task=None)
+    assert resp.task is None
