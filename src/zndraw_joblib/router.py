@@ -31,7 +31,20 @@ from zndraw_joblib.schemas import (
     TaskSubmitRequest,
     TaskResponse,
     TaskClaimResponse,
+    TaskUpdateRequest,
 )
+
+# Valid status transitions
+VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
+    TaskStatus.PENDING: {TaskStatus.CLAIMED, TaskStatus.CANCELLED},
+    TaskStatus.CLAIMED: {TaskStatus.RUNNING, TaskStatus.CANCELLED},
+    TaskStatus.RUNNING: {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.COMPLETED: set(),
+    TaskStatus.FAILED: set(),
+    TaskStatus.CANCELLED: set(),
+}
+
+TERMINAL_STATES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
 from zndraw_joblib.settings import JobLibSettings
 
 router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
@@ -333,4 +346,82 @@ async def claim_task(
             error=task.error,
             payload=task.payload,
         )
+    )
+
+
+@router.get("/tasks/{task_id}", response_model=TaskResponse)
+async def get_task_status(
+    task_id: UUID,
+    db: Session = Depends(get_db_session),
+):
+    """Get task status."""
+    task = db.exec(select(Task).where(Task.id == task_id)).first()
+    if not task:
+        raise TaskNotFound.exception(detail=f"Task '{task_id}' not found")
+
+    job = db.exec(select(Job).where(Job.id == task.job_id)).first()
+
+    return TaskResponse(
+        id=task.id,
+        job_name=job.full_name if job else "",
+        room_id=task.room_id,
+        status=task.status,
+        created_at=task.created_at,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+        error=task.error,
+        payload=task.payload,
+    )
+
+
+@router.patch("/tasks/{task_id}", response_model=TaskResponse)
+async def update_task_status(
+    task_id: UUID,
+    request: TaskUpdateRequest,
+    db: Session = Depends(get_db_session),
+    redis=Depends(get_redis_client),
+):
+    """Update task status. Publishes to Redis on terminal states."""
+    task = db.exec(select(Task).where(Task.id == task_id)).first()
+    if not task:
+        raise TaskNotFound.exception(detail=f"Task '{task_id}' not found")
+
+    # Validate transition
+    if request.status not in VALID_TRANSITIONS.get(task.status, set()):
+        raise InvalidTaskTransition.exception(
+            detail=f"Cannot transition from '{task.status.value}' to '{request.status.value}'"
+        )
+
+    # Update status
+    task.status = request.status
+    now = datetime.utcnow()
+
+    if request.status == TaskStatus.RUNNING:
+        task.started_at = now
+    elif request.status in TERMINAL_STATES:
+        task.completed_at = now
+        if request.error:
+            task.error = request.error
+
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    # Publish to Redis on terminal states
+    if request.status in TERMINAL_STATES:
+        channel = f"zndraw_joblib:task:{task_id}"
+        await redis.publish(channel, request.status.value)
+
+    job = db.exec(select(Job).where(Job.id == task.job_id)).first()
+
+    return TaskResponse(
+        id=task.id,
+        job_name=job.full_name if job else "",
+        room_id=task.room_id,
+        status=task.status,
+        created_at=task.created_at,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+        error=task.error,
+        payload=task.payload,
     )
