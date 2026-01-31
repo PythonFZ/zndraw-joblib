@@ -24,7 +24,13 @@ from zndraw_joblib.exceptions import (
     InvalidTaskTransition,
 )
 from zndraw_joblib.models import Job, Worker, WorkerJobLink, Task, TaskStatus
-from zndraw_joblib.schemas import JobRegisterRequest, JobResponse, JobSummary
+from zndraw_joblib.schemas import (
+    JobRegisterRequest,
+    JobResponse,
+    JobSummary,
+    TaskSubmitRequest,
+    TaskResponse,
+)
 from zndraw_joblib.settings import JobLibSettings
 
 router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
@@ -208,4 +214,71 @@ async def get_job(
         full_name=job.full_name,
         schema=job.schema_,
         worker_count=worker_count,
+    )
+
+
+@router.post(
+    "/rooms/{room_id}/tasks/{job_name:path}",
+    response_model=TaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def submit_task(
+    room_id: str,
+    job_name: str,
+    request: TaskSubmitRequest,
+    response: Response,
+    db: Session = Depends(get_db_session),
+    identity: str = Depends(get_current_identity),
+):
+    """Submit a task for processing."""
+    validate_room_id(room_id)
+
+    # Parse job_name
+    parts = job_name.split(":", 2)
+    if len(parts) != 3:
+        raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
+
+    job_room_id, category, name = parts
+
+    # Find the job
+    job = db.exec(
+        select(Job).where(
+            Job.room_id == job_room_id,
+            Job.category == category,
+            Job.name == name,
+        )
+    ).first()
+
+    if not job:
+        raise JobNotFound.exception(detail=f"Job '{job_name}' not found")
+
+    # For private jobs, ensure room matches
+    if job_room_id != "@global" and job_room_id != room_id:
+        raise JobNotFound.exception(
+            detail=f"Job '{job_name}' not accessible from room '{room_id}'"
+        )
+
+    # Create task
+    task = Task(
+        job_id=job.id,
+        room_id=room_id,
+        created_by_id=identity,
+        payload=request.payload,
+        status=TaskStatus.PENDING,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    # Set Location header
+    response.headers["Location"] = f"/v1/joblib/tasks/{task.id}"
+    response.headers["Retry-After"] = "1"
+
+    return TaskResponse(
+        id=task.id,
+        job_name=job.full_name,
+        room_id=task.room_id,
+        status=task.status,
+        created_at=task.created_at,
+        payload=task.payload,
     )
