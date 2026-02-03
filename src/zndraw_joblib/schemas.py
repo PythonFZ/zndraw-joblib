@@ -31,6 +31,12 @@ class JobSummary(BaseModel):
     worker_count: int
 
 
+class WorkerSummary(BaseModel):
+    id: str
+    last_heartbeat: datetime
+    job_count: int
+
+
 class TaskSubmitRequest(BaseModel):
     payload: dict[str, Any] = {}
 
