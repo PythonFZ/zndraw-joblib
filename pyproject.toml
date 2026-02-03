@@ -14,7 +14,6 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
     "pydantic-socketio",
-    "redis>=7.1.0",
     "sqlmodel>=0.0.31",
 ]
 
@@ -28,6 +27,7 @@ pydantic-socketio = { git = "https://github.com/PythonFZ/Pydantic-SocketIO/" }
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "uvicorn>=0.40.0",
 ]
 
 [tool.pytest.ini_options]
