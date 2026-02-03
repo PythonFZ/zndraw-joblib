@@ -227,3 +227,54 @@ def test_list_workers_returns_all(client_factory):
     worker_map = {w["id"]: w for w in workers}
     assert worker_map["worker-a"]["job_count"] == 2
     assert worker_map["worker-b"]["job_count"] == 1
+
+
+def test_list_workers_for_room_empty(client):
+    """List workers for room returns empty list when no workers."""
+    response = client.get("/v1/joblib/rooms/my-room/workers")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_workers_for_room_filters_by_room(client_factory):
+    """List workers for room only returns workers serving that room."""
+    client_a = client_factory("worker-a")
+    client_b = client_factory("worker-b")
+    client_c = client_factory("worker-c")
+
+    # Worker A serves room1 and @global
+    client_a.put("/v1/joblib/rooms/room1/jobs", json={"category": "modifiers", "name": "job1", "schema": {}})
+    client_a.put("/v1/joblib/rooms/@global/jobs", json={"category": "modifiers", "name": "global-job", "schema": {}})
+
+    # Worker B serves room2
+    client_b.put("/v1/joblib/rooms/room2/jobs", json={"category": "modifiers", "name": "job2", "schema": {}})
+
+    # Worker C serves room1
+    client_c.put("/v1/joblib/rooms/room1/jobs", json={"category": "selections", "name": "job3", "schema": {}})
+
+    # List workers for room1 - should include A (has room1 job + @global) and C
+    response = client_a.get("/v1/joblib/rooms/room1/workers")
+    assert response.status_code == 200
+    workers = response.json()
+    worker_ids = {w["id"] for w in workers}
+
+    assert "worker-a" in worker_ids
+    assert "worker-c" in worker_ids
+    assert "worker-b" not in worker_ids  # Only serves room2
+
+
+def test_list_workers_for_global_room(client_factory):
+    """List workers for @global room only returns workers serving @global jobs."""
+    client_a = client_factory("worker-a")
+    client_b = client_factory("worker-b")
+
+    client_a.put("/v1/joblib/rooms/@global/jobs", json={"category": "modifiers", "name": "global-job", "schema": {}})
+    client_b.put("/v1/joblib/rooms/room1/jobs", json={"category": "modifiers", "name": "job1", "schema": {}})
+
+    response = client_a.get("/v1/joblib/rooms/@global/workers")
+    assert response.status_code == 200
+    workers = response.json()
+    worker_ids = {w["id"] for w in workers}
+
+    assert "worker-a" in worker_ids
+    assert "worker-b" not in worker_ids

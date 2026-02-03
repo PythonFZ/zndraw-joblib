@@ -191,6 +191,55 @@ async def list_jobs(
     return result
 
 
+@router.get("/rooms/{room_id}/workers", response_model=list[WorkerSummary])
+async def list_workers_for_room(
+    room_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """List workers serving jobs in a room. Includes @global workers unless room_id is @global."""
+    validate_room_id(room_id)
+
+    # Find jobs for this room (and @global if not requesting @global specifically)
+    if room_id == "@global":
+        jobs = db.exec(
+            select(Job).where(Job.room_id == "@global", Job.deleted == False)
+        ).all()
+    else:
+        jobs = db.exec(
+            select(Job).where(
+                (Job.room_id == "@global") | (Job.room_id == room_id),
+                Job.deleted == False,
+            )
+        ).all()
+
+    job_ids = [job.id for job in jobs]
+    if not job_ids:
+        return []
+
+    # Find workers linked to these jobs
+    worker_ids = db.exec(
+        select(WorkerJobLink.worker_id).where(WorkerJobLink.job_id.in_(job_ids)).distinct()
+    ).all()
+
+    if not worker_ids:
+        return []
+
+    workers = db.exec(select(Worker).where(Worker.id.in_(worker_ids))).all()
+    result = []
+    for worker in workers:
+        job_count = len(
+            db.exec(select(WorkerJobLink).where(WorkerJobLink.worker_id == worker.id)).all()
+        )
+        result.append(
+            WorkerSummary(
+                id=worker.id,
+                last_heartbeat=worker.last_heartbeat,
+                job_count=job_count,
+            )
+        )
+    return result
+
+
 @router.get("/rooms/{room_id}/jobs/{job_name:path}", response_model=JobResponse)
 async def get_job(
     room_id: str,
