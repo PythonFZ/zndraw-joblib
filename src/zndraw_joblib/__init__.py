@@ -5,7 +5,6 @@ from zndraw_joblib.router import router
 from zndraw_joblib.models import Job, Worker, Task, WorkerJobLink, TaskStatus
 from zndraw_joblib.dependencies import (
     get_db_session,
-    get_redis_client,
     get_current_identity,
     get_is_admin,
     get_settings,
@@ -36,7 +35,6 @@ __all__ = [
     "TaskStatus",
     # Dependencies
     "get_db_session",
-    "get_redis_client",
     "get_current_identity",
     "get_is_admin",
     "get_settings",
