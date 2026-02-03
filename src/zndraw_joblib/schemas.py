@@ -21,14 +21,14 @@ class JobResponse(BaseModel):
     name: str
     full_name: str
     schema: dict[str, Any]
-    worker_count: int
+    workers: list[str]  # Changed from worker_count: int
 
 
 class JobSummary(BaseModel):
     full_name: str
     category: str
     name: str
-    worker_count: int
+    workers: list[str]  # Changed from worker_count: int
 
 
 class WorkerSummary(BaseModel):

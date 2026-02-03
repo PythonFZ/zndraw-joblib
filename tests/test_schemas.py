@@ -29,10 +29,11 @@ def test_job_response():
         name="Rotate",
         full_name="@global:modifiers:Rotate",
         schema={"angle": 0},
-        worker_count=2,
+        workers=["worker_1", "worker_2"],
     )
     assert resp.full_name == "@global:modifiers:Rotate"
-    assert resp.worker_count == 2
+    assert len(resp.workers) == 2
+    assert set(resp.workers) == {"worker_1", "worker_2"}
 
 
 def test_task_submit_request():

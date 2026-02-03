@@ -142,10 +142,11 @@ async def register_job(
     db.commit()
     db.refresh(job)
 
-    # Count workers for this job
-    worker_count = len(
-        db.exec(select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)).all()
-    )
+    # Get worker IDs for this job
+    worker_links = db.exec(
+        select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)
+    ).all()
+    worker_ids = [link.worker_id for link in worker_links]
 
     return JobResponse(
         id=job.id,
@@ -154,7 +155,7 @@ async def register_job(
         name=job.name,
         full_name=job.full_name,
         schema=job.schema_,
-        worker_count=worker_count,
+        workers=worker_ids,
     )
 
 
@@ -180,15 +181,16 @@ async def list_jobs(
 
     result = []
     for job in jobs:
-        worker_count = len(
-            db.exec(select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)).all()
-        )
+        worker_links = db.exec(
+            select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)
+        ).all()
+        worker_ids = [link.worker_id for link in worker_links]
         result.append(
             JobSummary(
                 full_name=job.full_name,
                 category=job.category,
                 name=job.name,
-                worker_count=worker_count,
+                workers=worker_ids,
             )
         )
     return result
@@ -381,9 +383,10 @@ async def get_job(
     if not job or job.deleted:
         raise JobNotFound.exception(detail=f"Job '{job_name}' not found")
 
-    worker_count = len(
-        db.exec(select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)).all()
-    )
+    worker_links = db.exec(
+        select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)
+    ).all()
+    worker_ids = [link.worker_id for link in worker_links]
 
     return JobResponse(
         id=job.id,
@@ -392,7 +395,7 @@ async def get_job(
         name=job.name,
         full_name=job.full_name,
         schema=job.schema_,
-        worker_count=worker_count,
+        workers=worker_ids,
     )
 
 

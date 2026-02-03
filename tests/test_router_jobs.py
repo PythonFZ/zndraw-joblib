@@ -12,7 +12,8 @@ def test_register_job_global(client):
     assert response.status_code == 201
     data = JobResponse.model_validate(response.json())
     assert data.full_name == "@global:modifiers:Rotate"
-    assert data.worker_count == 1
+    assert len(data.workers) == 1
+    assert "test_worker_id" in data.workers
 
 
 def test_register_job_private(client):
@@ -86,3 +87,32 @@ def test_register_job_invalid_room_id_with_colon(client):
     assert response.status_code == 400
     error = ProblemDetail.model_validate(response.json())
     assert error.status == 400
+
+
+def test_register_job_returns_worker_ids(seeded_client):
+    """Register job returns list of worker IDs instead of count."""
+    # seeded_client already registered @global:modifiers:Rotate
+    response = seeded_client.get("/v1/joblib/rooms/@global/jobs/@global:modifiers:Rotate")
+    data = response.json()
+
+    assert "workers" in data
+    assert isinstance(data["workers"], list)
+    assert "test_worker_id" in data["workers"]
+    assert "worker_count" not in data
+
+
+def test_list_jobs_returns_worker_ids(client_factory):
+    """List jobs returns worker IDs for each job."""
+    client1 = client_factory("worker-a")
+    client2 = client_factory("worker-b")
+
+    client1.put("/v1/joblib/rooms/@global/jobs", json={"category": "modifiers", "name": "TestJob", "schema": {}})
+    client2.put("/v1/joblib/rooms/@global/jobs", json={"category": "modifiers", "name": "TestJob", "schema": {}})
+
+    response = client1.get("/v1/joblib/rooms/@global/jobs")
+    jobs = response.json()
+
+    job = next(j for j in jobs if j["name"] == "TestJob")
+    assert "workers" in job
+    assert set(job["workers"]) == {"worker-a", "worker-b"}
+    assert "worker_count" not in job

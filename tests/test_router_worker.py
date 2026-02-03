@@ -73,7 +73,7 @@ def test_worker_delete_keeps_job_with_pending_task(seeded_client):
     assert response.status_code == 200
     data = JobResponse.model_validate(response.json())
     assert data.full_name == "@global:modifiers:Rotate"
-    assert data.worker_count == 0
+    assert data.workers == []
 
 
 def test_worker_delete_removes_job_after_task_completes(seeded_client):
@@ -94,8 +94,8 @@ def test_worker_delete_removes_job_after_task_completes(seeded_client):
     assert response.status_code == 404
 
 
-def test_worker_count_changes_with_workers(client_factory):
-    """worker_count should increase when workers register and decrease when removed."""
+def test_workers_list_changes_with_workers(client_factory):
+    """workers list should update when workers register and are removed."""
     client1 = client_factory("worker_1")
     client2 = client_factory("worker_2")
     client3 = client_factory("worker_3")
@@ -107,7 +107,8 @@ def test_worker_count_changes_with_workers(client_factory):
     )
     assert resp.status_code == 201
     data = JobResponse.model_validate(resp.json())
-    assert data.worker_count == 1
+    assert len(data.workers) == 1
+    assert "worker_1" in data.workers
 
     # Worker 2 registers same job
     resp = client2.put(
@@ -116,7 +117,8 @@ def test_worker_count_changes_with_workers(client_factory):
     )
     assert resp.status_code == 200  # Idempotent
     data = JobResponse.model_validate(resp.json())
-    assert data.worker_count == 2
+    assert len(data.workers) == 2
+    assert set(data.workers) == {"worker_1", "worker_2"}
 
     # Worker 3 registers same job
     resp = client3.put(
@@ -124,23 +126,26 @@ def test_worker_count_changes_with_workers(client_factory):
         json={"category": "modifiers", "name": "Rotate", "schema": {}},
     )
     data = JobResponse.model_validate(resp.json())
-    assert data.worker_count == 3
+    assert len(data.workers) == 3
+    assert set(data.workers) == {"worker_1", "worker_2", "worker_3"}
 
     # Remove worker 2
     client2.delete("/v1/joblib/workers/worker_2")
 
-    # Check worker count is now 2
+    # Check workers list now has 2 workers
     resp = client1.get("/v1/joblib/rooms/@global/jobs/@global:modifiers:Rotate")
     data = JobResponse.model_validate(resp.json())
-    assert data.worker_count == 2
+    assert len(data.workers) == 2
+    assert set(data.workers) == {"worker_1", "worker_3"}
 
     # Remove worker 1
     client1.delete("/v1/joblib/workers/worker_1")
 
-    # Check worker count is now 1
+    # Check workers list now has 1 worker
     resp = client3.get("/v1/joblib/rooms/@global/jobs/@global:modifiers:Rotate")
     data = JobResponse.model_validate(resp.json())
-    assert data.worker_count == 1
+    assert len(data.workers) == 1
+    assert data.workers == ["worker_3"]
 
 
 def test_worker_delete_fails_running_tasks(seeded_client):
