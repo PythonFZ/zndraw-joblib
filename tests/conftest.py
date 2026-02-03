@@ -11,7 +11,6 @@ from zndraw_joblib.dependencies import (
     get_db_session,
     get_current_identity,
     get_is_admin,
-    get_redis_client,
 )
 from zndraw_joblib.exceptions import ProblemException, problem_exception_handler
 
@@ -23,16 +22,6 @@ pytest_plugins = ["pytest_asyncio"]
 @pytest.fixture(scope="session")
 def anyio_backend():
     return "asyncio"
-
-
-class MockRedis:
-    """Mock Redis client for tests."""
-
-    async def publish(self, channel: str, message: str) -> None:
-        pass
-
-    async def subscribe(self, channel: str) -> None:
-        pass
 
 
 @pytest.fixture
@@ -84,17 +73,7 @@ def mock_is_admin():
 
 
 @pytest.fixture
-def mock_redis():
-    """Mock Redis client."""
-
-    async def get_mock_redis():
-        return MockRedis()
-
-    return get_mock_redis
-
-
-@pytest.fixture
-def app(db_session, mock_identity_factory, mock_is_admin, mock_redis):
+def app(db_session, mock_identity_factory, mock_is_admin):
     """Create a FastAPI app with dependency overrides."""
     app = FastAPI()
     app.include_router(router)
@@ -102,7 +81,6 @@ def app(db_session, mock_identity_factory, mock_is_admin, mock_redis):
     app.dependency_overrides[get_db_session] = db_session
     app.dependency_overrides[get_current_identity] = mock_identity_factory
     app.dependency_overrides[get_is_admin] = mock_is_admin
-    app.dependency_overrides[get_redis_client] = mock_redis
     return app
 
 
@@ -123,7 +101,7 @@ def seeded_client(client):
 
 
 @pytest.fixture
-def client_factory(db_session, mock_is_admin, mock_redis):
+def client_factory(db_session, mock_is_admin):
     """Factory to create clients with different identities."""
 
     def create_client(identity: str) -> TestClient:
@@ -136,7 +114,6 @@ def client_factory(db_session, mock_is_admin, mock_redis):
         app.dependency_overrides[get_db_session] = db_session
         app.dependency_overrides[get_current_identity] = get_identity
         app.dependency_overrides[get_is_admin] = mock_is_admin
-        app.dependency_overrides[get_redis_client] = mock_redis
         return TestClient(app)
 
     return create_client

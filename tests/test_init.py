@@ -15,7 +15,6 @@ def test_public_api_exports():
         TaskStatus,
         # Dependencies
         get_db_session,
-        get_redis_client,
         get_current_identity,
         get_is_admin,
         get_settings,
@@ -57,7 +56,6 @@ def test_all_exports_in_dunder_all():
         "WorkerJobLink",
         "TaskStatus",
         "get_db_session",
-        "get_redis_client",
         "get_current_identity",
         "get_is_admin",
         "get_settings",
