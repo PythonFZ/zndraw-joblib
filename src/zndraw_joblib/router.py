@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Header, Response, status
 from pydantic import BaseModel as PydanticBaseModel
 from sqlmodel import Session, select
 
@@ -547,12 +547,35 @@ async def claim_task(
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task_status(
     task_id: UUID,
+    response: Response,
     db: Session = Depends(get_db_session),
+    settings: JobLibSettings = Depends(get_settings),
+    prefer: str | None = Header(None),
 ):
     """Get task status."""
     task = db.exec(select(Task).where(Task.id == task_id)).first()
     if not task:
         raise TaskNotFound.exception(detail=f"Task '{task_id}' not found")
+
+    requested_wait = parse_prefer_wait(prefer)
+
+    # Only long-poll if wait requested AND task not in terminal state
+    if requested_wait and requested_wait > 0 and task.status not in TERMINAL_STATES:
+        effective_wait = min(requested_wait, settings.long_poll_max_wait_seconds)
+        elapsed = 0.0
+        poll_interval = 1.0  # Check DB every second
+
+        while elapsed < effective_wait and task.status not in TERMINAL_STATES:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+            # Re-fetch task from DB
+            db.expire_all()
+            task = db.exec(select(Task).where(Task.id == task_id)).first()
+            if not task:
+                raise TaskNotFound.exception(detail=f"Task '{task_id}' not found")
+
+        response.headers["Preference-Applied"] = f"wait={int(effective_wait)}"
 
     job = db.exec(select(Job).where(Job.id == task.job_id)).first()
 
