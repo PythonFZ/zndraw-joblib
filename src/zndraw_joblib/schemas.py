@@ -53,6 +53,14 @@ class TaskResponse(BaseModel):
     payload: dict[str, Any] = {}
 
 
+class TaskSummary(BaseModel):
+    id: UUID
+    job_name: str
+    status: TaskStatus
+    created_at: datetime
+    queue_position: Optional[int] = None  # Only set for PENDING tasks
+
+
 class TaskClaimResponse(BaseModel):
     task: Optional[TaskResponse] = None
 
