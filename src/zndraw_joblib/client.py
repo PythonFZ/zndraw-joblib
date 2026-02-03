@@ -114,13 +114,15 @@ class JobManager:
 
         schema = cls.model_json_schema()
 
-        self.api.http.put(
+        resp = self.api.http.put(
             f"{self.api.base_url}/v1/joblib/rooms/{room_id}/jobs",
             headers=self.api.get_headers(),
             json={"category": category, "name": name, "schema": schema},
         )
 
         full_name = f"{room_id}:{category}:{name}"
+        if resp.status_code == 200:
+            print(f"Already registered: {full_name}")
         self._registry[full_name] = cls
 
     def claim(self) -> ClaimedTask | None:
