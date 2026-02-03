@@ -340,3 +340,66 @@ def test_get_task_queue_position_null_for_non_pending(seeded_client):
 
     response = seeded_client.get(f"/v1/joblib/tasks/{task.json()['id']}")
     assert response.json()["queue_position"] is None
+
+
+def test_get_task_no_prefer_header_returns_immediately(seeded_client):
+    """Without Prefer header, returns immediately without Preference-Applied."""
+    submit_resp = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    task_id = submit_resp.json()["id"]
+
+    response = seeded_client.get(f"/v1/joblib/tasks/{task_id}")
+    assert response.status_code == 200
+    assert "Preference-Applied" not in response.headers
+
+
+def test_get_task_terminal_state_returns_immediately_despite_prefer(seeded_client):
+    """Terminal state returns immediately even with Prefer header."""
+    submit_resp = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    task_id = submit_resp.json()["id"]
+
+    # Cancel the task (terminal state)
+    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "cancelled"})
+
+    response = seeded_client.get(
+        f"/v1/joblib/tasks/{task_id}",
+        headers={"Prefer": "wait=30"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert "Preference-Applied" not in response.headers
+
+
+def test_get_task_with_prefer_wait_sets_preference_applied(seeded_client):
+    """Long-polling sets Preference-Applied header."""
+    submit_resp = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    task_id = submit_resp.json()["id"]
+
+    # Use very short wait to avoid test timeout
+    response = seeded_client.get(
+        f"/v1/joblib/tasks/{task_id}",
+        headers={"Prefer": "wait=1"}
+    )
+    assert response.status_code == 200
+    assert response.headers.get("Preference-Applied") == "wait=1"
+
+
+def test_parse_prefer_wait_various_formats():
+    """Test Prefer header parsing."""
+    from zndraw_joblib.router import parse_prefer_wait
+
+    assert parse_prefer_wait(None) is None
+    assert parse_prefer_wait("") is None
+    assert parse_prefer_wait("wait=30") == 30
+    assert parse_prefer_wait("wait=0") == 0
+    assert parse_prefer_wait("wait=30, respond-async") == 30
+    assert parse_prefer_wait("respond-async, wait=60") == 60
+    assert parse_prefer_wait("respond-async") is None
