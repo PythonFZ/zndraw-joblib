@@ -10,7 +10,6 @@ from zndraw_joblib.dependencies import (
     get_db_session,
     get_current_identity,
     get_is_admin,
-    get_redis_client,
     get_settings,
 )
 from zndraw_joblib.exceptions import (
@@ -572,9 +571,8 @@ async def update_task_status(
     task_id: UUID,
     request: TaskUpdateRequest,
     db: Session = Depends(get_db_session),
-    redis=Depends(get_redis_client),
 ):
-    """Update task status. Publishes to Redis on terminal states."""
+    """Update task status."""
     task = db.exec(select(Task).where(Task.id == task_id)).first()
     if not task:
         raise TaskNotFound.exception(detail=f"Task '{task_id}' not found")
@@ -600,12 +598,8 @@ async def update_task_status(
     db.commit()
     db.refresh(task)
 
-    # Publish to Redis on terminal states
+    # Check for orphan job cleanup (no workers and no non-terminal tasks)
     if request.status in TERMINAL_STATES:
-        channel = f"zndraw_joblib:task:{task_id}"
-        await redis.publish(channel, request.status.value)
-
-        # Check for orphan job cleanup (no workers and no non-terminal tasks)
         job_id = task.job_id
         remaining_workers = db.exec(
             select(WorkerJobLink).where(WorkerJobLink.job_id == job_id)
