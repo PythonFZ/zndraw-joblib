@@ -200,3 +200,69 @@ def test_update_task_invalid_transition_failed_to_running(seeded_client):
     assert response.status_code == 409
     error = ProblemDetail.model_validate(response.json())
     assert error.status == 409
+
+
+def test_list_tasks_for_room_empty(client):
+    """List tasks for room returns empty list when no tasks exist."""
+    response = client.get("/v1/joblib/rooms/my-room/tasks")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_tasks_for_room_returns_tasks(client_factory):
+    """List tasks for room returns all tasks submitted to that room."""
+    client1 = client_factory("worker-a")
+    client2 = client_factory("worker-b")
+
+    # Register jobs
+    client1.put("/v1/joblib/rooms/room1/jobs", json={"category": "modifiers", "name": "job1", "schema": {}})
+    client2.put("/v1/joblib/rooms/room2/jobs", json={"category": "modifiers", "name": "job2", "schema": {}})
+
+    # Submit tasks to different rooms
+    task1 = client1.post("/v1/joblib/rooms/room1/tasks/room1:modifiers:job1", json={"payload": {"data": 1}})
+    task2 = client1.post("/v1/joblib/rooms/room1/tasks/room1:modifiers:job1", json={"payload": {"data": 2}})
+    task3 = client2.post("/v1/joblib/rooms/room2/tasks/room2:modifiers:job2", json={"payload": {"data": 3}})
+
+    response = client1.get("/v1/joblib/rooms/room1/tasks")
+    assert response.status_code == 200
+    tasks = response.json()
+    assert len(tasks) == 2
+
+    task_ids = {t["id"] for t in tasks}
+    assert task1.json()["id"] in task_ids
+    assert task2.json()["id"] in task_ids
+    assert task3.json()["id"] not in task_ids
+
+
+def test_list_tasks_for_room_with_status_filter(seeded_client):
+    """List tasks for room can filter by status."""
+    # Submit tasks
+    seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 1}})
+    task2 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 2}})
+
+    # Cancel second task
+    seeded_client.patch(f"/v1/joblib/tasks/{task2.json()['id']}", json={"status": "cancelled"})
+
+    # Filter for pending only
+    response = seeded_client.get("/v1/joblib/rooms/room_1/tasks?status=pending")
+    assert response.status_code == 200
+    tasks = response.json()
+    assert len(tasks) == 1
+    assert tasks[0]["status"] == "pending"
+
+
+def test_list_tasks_for_room_includes_queue_position(seeded_client):
+    """List tasks includes queue_position for pending tasks."""
+    # Submit 3 tasks
+    task1 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 1}})
+    task2 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 2}})
+    task3 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 3}})
+
+    response = seeded_client.get("/v1/joblib/rooms/room_1/tasks")
+    assert response.status_code == 200
+    tasks = response.json()
+
+    task_map = {t["id"]: t for t in tasks}
+    assert task_map[task1.json()["id"]]["queue_position"] == 1
+    assert task_map[task2.json()["id"]]["queue_position"] == 2
+    assert task_map[task3.json()["id"]]["queue_position"] == 3

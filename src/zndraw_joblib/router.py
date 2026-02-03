@@ -24,6 +24,8 @@ from zndraw_joblib.exceptions import (
     InvalidTaskTransition,
 )
 from zndraw_joblib.models import Job, Worker, WorkerJobLink, Task, TaskStatus
+from typing import Optional
+
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
     JobResponse,
@@ -31,6 +33,7 @@ from zndraw_joblib.schemas import (
     TaskSubmitRequest,
     TaskResponse,
     TaskClaimResponse,
+    TaskSummary,
     TaskUpdateRequest,
     WorkerSummary,
 )
@@ -235,6 +238,49 @@ async def list_workers_for_room(
                 id=worker.id,
                 last_heartbeat=worker.last_heartbeat,
                 job_count=job_count,
+            )
+        )
+    return result
+
+
+@router.get("/rooms/{room_id}/tasks", response_model=list[TaskSummary])
+async def list_tasks_for_room(
+    room_id: str,
+    status: Optional[TaskStatus] = None,
+    db: Session = Depends(get_db_session),
+):
+    """List tasks for a room, optionally filtered by status. Includes queue position for pending tasks."""
+    validate_room_id(room_id)
+
+    query = select(Task).where(Task.room_id == room_id)
+    if status:
+        query = query.where(Task.status == status)
+    query = query.order_by(Task.created_at.asc())
+
+    tasks = db.exec(query).all()
+
+    result = []
+    for task in tasks:
+        job = db.exec(select(Job).where(Job.id == task.job_id)).first()
+
+        queue_position = None
+        if task.status == TaskStatus.PENDING:
+            count = db.exec(
+                select(Task).where(
+                    Task.job_id == task.job_id,
+                    Task.status == TaskStatus.PENDING,
+                    Task.created_at < task.created_at,
+                )
+            ).all()
+            queue_position = len(count) + 1
+
+        result.append(
+            TaskSummary(
+                id=task.id,
+                job_name=job.full_name if job else "",
+                status=task.status,
+                created_at=task.created_at,
+                queue_position=queue_position,
             )
         )
     return result
