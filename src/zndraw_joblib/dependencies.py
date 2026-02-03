@@ -2,7 +2,6 @@
 from functools import lru_cache
 from typing import AsyncGenerator
 
-from redis.asyncio import Redis
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from zndraw_joblib.settings import JobLibSettings
@@ -12,11 +11,6 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """Stub: Override via app.dependency_overrides."""
     raise NotImplementedError("Dependency not configured")
     yield  # type: ignore
-
-
-async def get_redis_client() -> Redis:
-    """Stub: Override via app.dependency_overrides."""
-    raise NotImplementedError("Dependency not configured")
 
 
 async def get_current_identity() -> str:
