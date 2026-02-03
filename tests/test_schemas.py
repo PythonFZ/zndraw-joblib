@@ -1,5 +1,4 @@
 # tests/test_schemas.py
-import pytest
 from datetime import datetime
 from uuid import UUID
 
@@ -18,10 +17,12 @@ def test_job_register_request():
     req = JobRegisterRequest(category="modifiers", name="Rotate", schema={"angle": 0})
     assert req.category == "modifiers"
     assert req.name == "Rotate"
-    assert req.schema == {"angle": 0}
+    assert req.schema_ == {"angle": 0}
 
 
 def test_job_response():
+    worker1_id = UUID("11111111-1111-1111-1111-111111111111")
+    worker2_id = UUID("22222222-2222-2222-2222-222222222222")
     resp = JobResponse(
         id=UUID("12345678-1234-5678-1234-567812345678"),
         room_id="@global",
@@ -29,11 +30,11 @@ def test_job_response():
         name="Rotate",
         full_name="@global:modifiers:Rotate",
         schema={"angle": 0},
-        workers=["worker_1", "worker_2"],
+        workers=[worker1_id, worker2_id],
     )
     assert resp.full_name == "@global:modifiers:Rotate"
     assert len(resp.workers) == 2
-    assert set(resp.workers) == {"worker_1", "worker_2"}
+    assert set(resp.workers) == {worker1_id, worker2_id}
 
 
 def test_task_submit_request():

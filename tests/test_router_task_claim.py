@@ -1,5 +1,6 @@
 # tests/test_router_task_claim.py
 """Tests for task claim endpoint using shared fixtures."""
+
 from zndraw_joblib.schemas import TaskClaimResponse
 
 

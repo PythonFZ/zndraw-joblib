@@ -1,6 +1,4 @@
 # tests/test_settings.py
-import os
-import pytest
 from zndraw_joblib.settings import JobLibSettings
 
 

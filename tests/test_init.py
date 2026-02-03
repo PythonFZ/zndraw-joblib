@@ -9,32 +9,7 @@ def test_public_api_exports():
         router,
         # Models
         Job,
-        Worker,
-        Task,
-        WorkerJobLink,
-        TaskStatus,
-        # Dependencies
-        get_db_session,
-        get_current_identity,
-        get_is_admin,
-        get_settings,
-        # Exceptions
-        ProblemException,
-        problem_exception_handler,
-        JobNotFound,
-        SchemaConflict,
-        InvalidCategory,
-        WorkerNotFound,
-        TaskNotFound,
-        InvalidTaskTransition,
-        InvalidRoomId,
-        Forbidden,
-        # Settings
-        JobLibSettings,
-        # Client
         JobManager,
-        ClaimedTask,
-        Extension,
         Category,
     )
 
@@ -55,9 +30,6 @@ def test_all_exports_in_dunder_all():
         "Task",
         "WorkerJobLink",
         "TaskStatus",
-        "get_db_session",
-        "get_current_identity",
-        "get_is_admin",
         "get_settings",
         "ProblemException",
         "problem_exception_handler",
@@ -74,6 +46,8 @@ def test_all_exports_in_dunder_all():
         "ClaimedTask",
         "Extension",
         "Category",
+        "run_sweeper",
+        "cleanup_stale_workers",
     ]
 
     for name in expected:

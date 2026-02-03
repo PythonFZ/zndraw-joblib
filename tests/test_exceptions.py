@@ -1,8 +1,5 @@
 # tests/test_exceptions.py
-import pytest
 from zndraw_joblib.exceptions import (
-    ProblemType,
-    ProblemDetail,
     ProblemException,
     JobNotFound,
     SchemaConflict,

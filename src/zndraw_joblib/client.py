@@ -1,12 +1,19 @@
 # src/zndraw_joblib/client.py
 """Client SDK for ZnDraw JobLib workers."""
+
 import time
-from datetime import datetime
 from enum import Enum
-from typing import Any, ClassVar, Generic, Iterator, Protocol, TypeVar
+from typing import ClassVar, Generic, Iterator, Protocol, TypeVar
+from uuid import UUID
 
 import httpx
 from pydantic import BaseModel
+
+from zndraw_joblib.schemas import (
+    JobRegisterRequest,
+    TaskSubmitRequest,
+    TaskClaimResponse,
+)
 
 
 class Category(str, Enum):
@@ -25,6 +32,10 @@ class Extension(BaseModel):
     """
 
     category: ClassVar[Category]
+
+    def run(self) -> None:
+        """Execute the extension logic. Override in subclasses."""
+        raise NotImplementedError(f"{self.__class__.__name__}.run() not implemented")
 
 
 E = TypeVar("E", bound=Extension)
@@ -63,7 +74,7 @@ class JobManager:
     def __init__(self, api: ApiManager):
         self.api = api
         self._registry: dict[str, type[Extension]] = {}
-        self._worker_id: str | None = None
+        self._worker_id: UUID | None = None
 
     def __getitem__(self, key: str) -> type[Extension]:
         return self._registry[key]
@@ -76,6 +87,25 @@ class JobManager:
 
     def __iter__(self) -> Iterator[str]:
         return iter(self._registry)
+
+    @property
+    def worker_id(self) -> UUID | None:
+        """The worker ID for this manager (set after create_worker or first job registration)."""
+        return self._worker_id
+
+    def create_worker(self) -> UUID:
+        """Create a new worker and return its ID.
+
+        The worker is linked to the authenticated user. Use this to explicitly
+        create a worker before registering jobs.
+        """
+        response = self.api.http.post(
+            f"{self.api.base_url}/v1/joblib/workers",
+            headers=self.api.get_headers(),
+        )
+        response.raise_for_status()
+        self._worker_id = UUID(response.json()["id"])
+        return self._worker_id
 
     def register(
         self,
@@ -114,13 +144,28 @@ class JobManager:
 
         schema = cls.model_json_schema()
 
+        # Build request using Pydantic model
+        request = JobRegisterRequest(
+            category=category,
+            name=name,
+            schema=schema,
+            worker_id=self._worker_id,
+        )
+
         resp = self.api.http.put(
             f"{self.api.base_url}/v1/joblib/rooms/{room_id}/jobs",
             headers=self.api.get_headers(),
-            json={"category": category, "name": name, "schema": schema},
+            json=request.model_dump(exclude_none=True, mode="json"),
         )
+        resp.raise_for_status()
 
+        data = resp.json()
         full_name = f"{room_id}:{category}:{name}"
+
+        # Extract worker_id from response if auto-created
+        if "worker_id" in data and data["worker_id"]:
+            self._worker_id = UUID(data["worker_id"])
+
         if resp.status_code == 200:
             print(f"Already registered: {full_name}")
         self._registry[full_name] = cls
@@ -135,25 +180,25 @@ class JobManager:
             f"{self.api.base_url}/v1/joblib/tasks/claim",
             headers=self.api.get_headers(),
         )
-        data = response.json()
+        claim_response = TaskClaimResponse.model_validate(response.json())
 
-        if data.get("task") is None:
+        if claim_response.task is None:
             return None
 
-        task_data = data["task"]
-        job_name = task_data["job_name"]
+        task = claim_response.task
+        job_name = task.job_name
 
         # Look up the Extension class from registry
         if job_name not in self._registry:
             raise KeyError(f"Job '{job_name}' not registered with this JobManager")
 
         extension_cls = self._registry[job_name]
-        extension = extension_cls.model_validate(task_data["payload"])
+        extension = extension_cls.model_validate(task.payload)
 
         return ClaimedTask(
-            task_id=task_data["id"],
+            task_id=str(task.id),
             job_name=job_name,
-            room_id=task_data["room_id"],
+            room_id=task.room_id,
             extension=extension,
         )
 
@@ -172,16 +217,40 @@ class JobManager:
 
     def heartbeat(self) -> None:
         """Send a heartbeat to keep the worker alive."""
-        worker_id = self._get_worker_id()
+        if self._worker_id is None:
+            raise ValueError(
+                "Worker ID not set. Call create_worker() or register a job first."
+            )
         self.api.http.patch(
-            f"{self.api.base_url}/v1/joblib/workers/{worker_id}",
+            f"{self.api.base_url}/v1/joblib/workers/{self._worker_id}",
             headers=self.api.get_headers(),
         )
 
-    def _get_worker_id(self) -> str:
-        """Get or fetch the worker ID."""
-        if self._worker_id is None:
-            # In a real implementation, this would come from auth
-            # For now, we assume it's set externally or via registration
-            raise ValueError("Worker ID not set. Set manager._worker_id or authenticate first.")
-        return self._worker_id
+    def submit(
+        self, extension: Extension, room: str, *, job_room: str = "@global"
+    ) -> str:
+        """
+        Submit a task for processing.
+
+        Args:
+            extension: The Extension instance with parameters
+            room: The room to submit the task to
+            job_room: The room where the job is registered (default: @global)
+
+        Returns:
+            The task ID
+        """
+        category = extension.category.value
+        name = extension.__class__.__name__
+        job_name = f"{job_room}:{category}:{name}"
+
+        # Build request using Pydantic model
+        request = TaskSubmitRequest(payload=extension.model_dump())
+
+        response = self.api.http.post(
+            f"{self.api.base_url}/v1/joblib/rooms/{room}/tasks/{job_name}",
+            headers=self.api.get_headers(),
+            json=request.model_dump(),
+        )
+        response.raise_for_status()
+        return response.json()["id"]

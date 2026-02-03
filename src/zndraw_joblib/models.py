@@ -1,13 +1,14 @@
 # src/zndraw_joblib/models.py
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
 import uuid
 
-from sqlalchemy import Column, UniqueConstraint
+from sqlalchemy import UniqueConstraint, ForeignKey, String, Boolean, DateTime, Text
 from sqlalchemy.types import JSON
-from sqlmodel import SQLModel, Field, Relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from zndraw_auth import Base
 
 
 class TaskStatus(str, Enum):
@@ -19,34 +20,36 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class WorkerJobLink(SQLModel, table=True):
+class WorkerJobLink(Base):
     """Bare M:N link between Worker and Job."""
 
     __tablename__ = "worker_job_link"
 
-    worker_id: str = Field(foreign_key="worker.id", primary_key=True)
-    job_id: uuid.UUID = Field(foreign_key="job.id", primary_key=True)
+    worker_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("worker.id", ondelete="CASCADE"), primary_key=True
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("job.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
-class Job(SQLModel, table=True):
+class Job(Base):
     __tablename__ = "job"
     __table_args__ = (
         UniqueConstraint("room_id", "category", "name", name="unique_job"),
     )
 
-    id: uuid.UUID = Field(default_factory=uuid4, primary_key=True)
-    room_id: str = Field(index=True)
-    category: str = Field(index=True)
-    name: str = Field(index=True)
-    schema_: dict[str, Any] = Field(
-        default_factory=dict, sa_column=Column("schema", JSON)
-    )
-    deleted: bool = Field(default=False, index=True)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid4)
+    room_id: Mapped[str] = mapped_column(String, index=True)
+    category: Mapped[str] = mapped_column(String, index=True)
+    name: Mapped[str] = mapped_column(String, index=True)
+    schema_: Mapped[dict[str, Any]] = mapped_column("schema", JSON, default=dict)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     # Relationships
-    tasks: list["Task"] = Relationship(back_populates="job")
-    workers: list["Worker"] = Relationship(
-        back_populates="jobs", link_model=WorkerJobLink
+    tasks: Mapped[list["Task"]] = relationship(back_populates="job")
+    workers: Mapped[list["Worker"]] = relationship(
+        back_populates="jobs", secondary="worker_job_link"
     )
 
     @property
@@ -54,38 +57,55 @@ class Job(SQLModel, table=True):
         return f"{self.room_id}:{self.category}:{self.name}"
 
 
-class Worker(SQLModel, table=True):
+class Worker(Base):
     __tablename__ = "worker"
 
-    id: str = Field(primary_key=True)
-    last_heartbeat: datetime = Field(default_factory=datetime.utcnow, index=True)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), index=True
+    )
+    last_heartbeat: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )
 
     # Relationships
-    jobs: list[Job] = Relationship(back_populates="workers", link_model=WorkerJobLink)
-    tasks: list["Task"] = Relationship(back_populates="worker")
+    jobs: Mapped[list[Job]] = relationship(
+        back_populates="workers", secondary="worker_job_link"
+    )
+    tasks: Mapped[list["Task"]] = relationship(back_populates="worker")
 
     def is_alive(self, threshold: timedelta) -> bool:
-        return datetime.utcnow() - self.last_heartbeat < threshold
+        return datetime.now(timezone.utc) - self.last_heartbeat < threshold
 
 
-class Task(SQLModel, table=True):
+class Task(Base):
     __tablename__ = "task"
 
-    id: uuid.UUID = Field(default_factory=uuid4, primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid4)
 
-    job_id: uuid.UUID = Field(foreign_key="job.id", index=True)
-    job: Optional[Job] = Relationship(back_populates="tasks")
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job.id"), index=True)
+    job: Mapped[Optional[Job]] = relationship(back_populates="tasks")
 
-    worker_id: Optional[str] = Field(default=None, foreign_key="worker.id")
-    worker: Optional[Worker] = Relationship(back_populates="tasks")
+    worker_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("worker.id"), default=None, index=True, nullable=True
+    )
+    worker: Mapped[Optional[Worker]] = relationship(back_populates="tasks")
 
-    room_id: str = Field(index=True)
-    created_by_id: Optional[str] = Field(default=None, index=True)
+    room_id: Mapped[str] = mapped_column(String, index=True)
+    created_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        default=None, index=True, nullable=True
+    )
 
-    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    status: TaskStatus = Field(default=TaskStatus.PENDING, index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[TaskStatus] = mapped_column(default=TaskStatus.PENDING, index=True)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    error: Optional[str] = None
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=None, nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=None, nullable=True
+    )
+    error: Mapped[Optional[str]] = mapped_column(Text, default=None, nullable=True)

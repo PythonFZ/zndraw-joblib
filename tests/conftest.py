@@ -1,17 +1,18 @@
 # tests/conftest.py
 """Shared test fixtures for DRY tests."""
+
+import uuid
+from typing import AsyncGenerator
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlmodel import SQLModel, create_engine, Session
-from sqlmodel.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from zndraw_auth import Base, User
 from zndraw_joblib.router import router
-from zndraw_joblib.dependencies import (
-    get_db_session,
-    get_current_identity,
-    get_is_admin,
-)
 from zndraw_joblib.exceptions import ProblemException, problem_exception_handler
 
 
@@ -25,62 +26,74 @@ def anyio_backend():
 
 
 @pytest.fixture
-def engine():
-    """Create an in-memory SQLite database engine."""
-    return create_engine(
-        "sqlite://",
+def test_user_id():
+    """Fixed UUID for test user."""
+    return uuid.UUID("12345678-1234-5678-1234-567812345678")
+
+
+@pytest.fixture
+def test_user(test_user_id):
+    """Create a mock User for testing."""
+    user = MagicMock(spec=User)
+    user.id = test_user_id
+    user.email = "test@example.com"
+    user.is_active = True
+    user.is_superuser = True
+    user.is_verified = True
+    return user
+
+
+@pytest.fixture
+def async_engine():
+    """Create an async in-memory SQLite database engine."""
+    return create_async_engine(
+        "sqlite+aiosqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
 
 
 @pytest.fixture
-def db_session(engine):
-    """Create tables and return a session generator."""
-    SQLModel.metadata.create_all(engine)
+async def async_session_factory(async_engine):
+    """Create tables and return an async session factory."""
+    async with async_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-    def get_test_session():
-        with Session(engine) as session:
+    return async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest.fixture
+def db_session(async_session_factory):
+    """Return an async session generator for dependency injection."""
+
+    async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
+        async with async_session_factory() as session:
             yield session
 
     return get_test_session
 
 
 @pytest.fixture
-def mock_identity():
-    """Default identity for tests."""
-    return "test_worker_id"
+def mock_current_user(test_user):
+    """Factory that returns the current user dependency."""
+
+    async def get_current_user():
+        return test_user
+
+    return get_current_user
 
 
 @pytest.fixture
-def mock_identity_factory(mock_identity):
-    """Factory that returns the identity dependency."""
-
-    async def get_test_identity():
-        return mock_identity
-
-    return get_test_identity
-
-
-@pytest.fixture
-def mock_is_admin():
-    """Default admin status for tests."""
-
-    async def get_test_is_admin():
-        return True
-
-    return get_test_is_admin
-
-
-@pytest.fixture
-def app(db_session, mock_identity_factory, mock_is_admin):
+def app(db_session, mock_current_user):
     """Create a FastAPI app with dependency overrides."""
+    from zndraw_auth import current_active_user, current_superuser, get_async_session
+
     app = FastAPI()
     app.include_router(router)
     app.add_exception_handler(ProblemException, problem_exception_handler)
-    app.dependency_overrides[get_db_session] = db_session
-    app.dependency_overrides[get_current_identity] = mock_identity_factory
-    app.dependency_overrides[get_is_admin] = mock_is_admin
+    app.dependency_overrides[get_async_session] = db_session
+    app.dependency_overrides[current_active_user] = mock_current_user
+    app.dependency_overrides[current_superuser] = mock_current_user
     return app
 
 
@@ -93,27 +106,49 @@ def client(app):
 @pytest.fixture
 def seeded_client(client):
     """Client with a pre-registered job for testing."""
-    client.put(
+    resp = client.put(
         "/v1/joblib/rooms/@global/jobs",
         json={"category": "modifiers", "name": "Rotate", "schema": {}},
     )
+    # Store the worker_id for tests that need it
+    worker_id = resp.json().get("worker_id")
+    client.seeded_worker_id = worker_id
     return client
 
 
 @pytest.fixture
-def client_factory(db_session, mock_is_admin):
-    """Factory to create clients with different identities."""
+def client_factory(async_session_factory):
+    """Factory to create clients with different user identities."""
+    from zndraw_auth import current_active_user, current_superuser, get_async_session
 
-    def create_client(identity: str) -> TestClient:
-        async def get_identity():
-            return identity
+    def create_client(identity: str, is_superuser: bool = True) -> TestClient:
+        # Create a unique user ID for each identity
+        user_id = uuid.uuid5(uuid.NAMESPACE_DNS, identity)
+
+        user = MagicMock(spec=User)
+        user.id = user_id
+        user.email = f"{identity}@example.com"
+        user.is_active = True
+        user.is_superuser = is_superuser
+        user.is_verified = True
+
+        async def get_current_user():
+            return user
+
+        async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
+            async with async_session_factory() as session:
+                yield session
 
         app = FastAPI()
         app.include_router(router)
         app.add_exception_handler(ProblemException, problem_exception_handler)
-        app.dependency_overrides[get_db_session] = db_session
-        app.dependency_overrides[get_current_identity] = get_identity
-        app.dependency_overrides[get_is_admin] = mock_is_admin
-        return TestClient(app)
+        app.dependency_overrides[get_async_session] = get_test_session
+        app.dependency_overrides[current_active_user] = get_current_user
+        app.dependency_overrides[current_superuser] = get_current_user
+
+        test_client = TestClient(app)
+        # Attach user info for tests that need to track workers
+        test_client.user_id = user_id
+        return test_client
 
     return create_client

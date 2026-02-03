@@ -1,5 +1,6 @@
 # tests/test_router_job_list.py
 """Tests for job listing and details endpoints using shared fixtures."""
+
 import pytest
 from pydantic import TypeAdapter
 

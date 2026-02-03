@@ -1,5 +1,6 @@
 # tests/test_router_task_status.py
 """Tests for task status and update endpoints using shared fixtures."""
+
 from uuid import uuid4
 
 from zndraw_joblib.schemas import TaskResponse, TaskClaimResponse
@@ -215,13 +216,28 @@ def test_list_tasks_for_room_returns_tasks(client_factory):
     client2 = client_factory("worker-b")
 
     # Register jobs
-    client1.put("/v1/joblib/rooms/room1/jobs", json={"category": "modifiers", "name": "job1", "schema": {}})
-    client2.put("/v1/joblib/rooms/room2/jobs", json={"category": "modifiers", "name": "job2", "schema": {}})
+    client1.put(
+        "/v1/joblib/rooms/room1/jobs",
+        json={"category": "modifiers", "name": "job1", "schema": {}},
+    )
+    client2.put(
+        "/v1/joblib/rooms/room2/jobs",
+        json={"category": "modifiers", "name": "job2", "schema": {}},
+    )
 
     # Submit tasks to different rooms
-    task1 = client1.post("/v1/joblib/rooms/room1/tasks/room1:modifiers:job1", json={"payload": {"data": 1}})
-    task2 = client1.post("/v1/joblib/rooms/room1/tasks/room1:modifiers:job1", json={"payload": {"data": 2}})
-    task3 = client2.post("/v1/joblib/rooms/room2/tasks/room2:modifiers:job2", json={"payload": {"data": 3}})
+    task1 = client1.post(
+        "/v1/joblib/rooms/room1/tasks/room1:modifiers:job1",
+        json={"payload": {"data": 1}},
+    )
+    task2 = client1.post(
+        "/v1/joblib/rooms/room1/tasks/room1:modifiers:job1",
+        json={"payload": {"data": 2}},
+    )
+    task3 = client2.post(
+        "/v1/joblib/rooms/room2/tasks/room2:modifiers:job2",
+        json={"payload": {"data": 3}},
+    )
 
     response = client1.get("/v1/joblib/rooms/room1/tasks")
     assert response.status_code == 200
@@ -237,11 +253,19 @@ def test_list_tasks_for_room_returns_tasks(client_factory):
 def test_list_tasks_for_room_with_status_filter(seeded_client):
     """List tasks for room can filter by status."""
     # Submit tasks
-    seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 1}})
-    task2 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 2}})
+    seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {"data": 1}},
+    )
+    task2 = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {"data": 2}},
+    )
 
     # Cancel second task
-    seeded_client.patch(f"/v1/joblib/tasks/{task2.json()['id']}", json={"status": "cancelled"})
+    seeded_client.patch(
+        f"/v1/joblib/tasks/{task2.json()['id']}", json={"status": "cancelled"}
+    )
 
     # Filter for pending only
     response = seeded_client.get("/v1/joblib/rooms/room_1/tasks?status=pending")
@@ -254,9 +278,18 @@ def test_list_tasks_for_room_with_status_filter(seeded_client):
 def test_list_tasks_for_room_includes_queue_position(seeded_client):
     """List tasks includes queue_position for pending tasks."""
     # Submit 3 tasks
-    task1 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 1}})
-    task2 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 2}})
-    task3 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 3}})
+    task1 = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {"data": 1}},
+    )
+    task2 = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {"data": 2}},
+    )
+    task3 = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {"data": 3}},
+    )
 
     response = seeded_client.get("/v1/joblib/rooms/room_1/tasks")
     assert response.status_code == 200
@@ -270,7 +303,9 @@ def test_list_tasks_for_room_includes_queue_position(seeded_client):
 
 def test_list_tasks_for_job_empty(seeded_client):
     """List tasks for job returns empty list when no tasks exist."""
-    response = seeded_client.get("/v1/joblib/rooms/@global/jobs/@global:modifiers:Rotate/tasks")
+    response = seeded_client.get(
+        "/v1/joblib/rooms/@global/jobs/@global:modifiers:Rotate/tasks"
+    )
     assert response.status_code == 200
     assert response.json() == []
 
@@ -280,12 +315,24 @@ def test_list_tasks_for_job_filters_by_job(client_factory):
     client = client_factory("worker-a")
 
     # Register two jobs
-    client.put("/v1/joblib/rooms/room1/jobs", json={"category": "modifiers", "name": "job1", "schema": {}})
-    client.put("/v1/joblib/rooms/room1/jobs", json={"category": "modifiers", "name": "job2", "schema": {}})
+    client.put(
+        "/v1/joblib/rooms/room1/jobs",
+        json={"category": "modifiers", "name": "job1", "schema": {}},
+    )
+    client.put(
+        "/v1/joblib/rooms/room1/jobs",
+        json={"category": "modifiers", "name": "job2", "schema": {}},
+    )
 
     # Submit tasks to both jobs
-    task1 = client.post("/v1/joblib/rooms/room1/tasks/room1:modifiers:job1", json={"payload": {"data": 1}})
-    task2 = client.post("/v1/joblib/rooms/room1/tasks/room1:modifiers:job2", json={"payload": {"data": 2}})
+    task1 = client.post(
+        "/v1/joblib/rooms/room1/tasks/room1:modifiers:job1",
+        json={"payload": {"data": 1}},
+    )
+    client.post(
+        "/v1/joblib/rooms/room1/tasks/room1:modifiers:job2",
+        json={"payload": {"data": 2}},
+    )
 
     response = client.get("/v1/joblib/rooms/room1/jobs/room1:modifiers:job1/tasks")
     assert response.status_code == 200
@@ -296,7 +343,9 @@ def test_list_tasks_for_job_filters_by_job(client_factory):
 
 def test_list_tasks_for_job_not_found(client):
     """List tasks for non-existent job returns 404."""
-    response = client.get("/v1/joblib/rooms/room1/jobs/room1:modifiers:nonexistent/tasks")
+    response = client.get(
+        "/v1/joblib/rooms/room1/jobs/room1:modifiers:nonexistent/tasks"
+    )
     assert response.status_code == 404
 
 
@@ -305,9 +354,14 @@ def test_list_tasks_for_global_job_from_room(seeded_client):
     # seeded_client has @global:modifiers:Rotate registered
 
     # Submit task from room_1 to global job
-    task1 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 1}})
+    task1 = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {"data": 1}},
+    )
 
-    response = seeded_client.get("/v1/joblib/rooms/room_1/jobs/@global:modifiers:Rotate/tasks")
+    response = seeded_client.get(
+        "/v1/joblib/rooms/room_1/jobs/@global:modifiers:Rotate/tasks"
+    )
     assert response.status_code == 200
     tasks = response.json()
     assert len(tasks) == 1
@@ -317,9 +371,18 @@ def test_list_tasks_for_global_job_from_room(seeded_client):
 def test_get_task_includes_queue_position(seeded_client):
     """GET /tasks/{task_id} includes queue_position for pending tasks."""
     # Submit 3 tasks
-    task1 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 1}})
-    task2 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 2}})
-    task3 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 3}})
+    task1 = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {"data": 1}},
+    )
+    task2 = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {"data": 2}},
+    )
+    task3 = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {"data": 3}},
+    )
 
     # Check queue positions
     resp1 = seeded_client.get(f"/v1/joblib/tasks/{task1.json()['id']}")
@@ -333,10 +396,15 @@ def test_get_task_includes_queue_position(seeded_client):
 
 def test_get_task_queue_position_null_for_non_pending(seeded_client):
     """GET /tasks/{task_id} returns null queue_position for non-pending tasks."""
-    task = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 1}})
+    task = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {"data": 1}},
+    )
 
     # Cancel the task
-    seeded_client.patch(f"/v1/joblib/tasks/{task.json()['id']}", json={"status": "cancelled"})
+    seeded_client.patch(
+        f"/v1/joblib/tasks/{task.json()['id']}", json={"status": "cancelled"}
+    )
 
     response = seeded_client.get(f"/v1/joblib/tasks/{task.json()['id']}")
     assert response.json()["queue_position"] is None
@@ -367,8 +435,7 @@ def test_get_task_terminal_state_returns_immediately_despite_prefer(seeded_clien
     seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "cancelled"})
 
     response = seeded_client.get(
-        f"/v1/joblib/tasks/{task_id}",
-        headers={"Prefer": "wait=30"}
+        f"/v1/joblib/tasks/{task_id}", headers={"Prefer": "wait=30"}
     )
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
@@ -385,8 +452,7 @@ def test_get_task_with_prefer_wait_sets_preference_applied(seeded_client):
 
     # Use very short wait to avoid test timeout
     response = seeded_client.get(
-        f"/v1/joblib/tasks/{task_id}",
-        headers={"Prefer": "wait=1"}
+        f"/v1/joblib/tasks/{task_id}", headers={"Prefer": "wait=1"}
     )
     assert response.status_code == 200
     assert response.headers.get("Preference-Applied") == "wait=1"

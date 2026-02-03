@@ -1,12 +1,9 @@
 # tests/test_client.py
 """Integration tests for the client SDK against the actual server."""
-from datetime import datetime
+
 from typing import ClassVar
 
-import pytest
-
 from zndraw_joblib.client import (
-    ClaimedTask,
     JobManager,
     Extension,
     Category,
@@ -191,9 +188,9 @@ def test_job_manager_schema_sent_to_server(client):
     assert response.status_code == 200
     job = JobResponse.model_validate(response.json())
 
-    assert "properties" in job.schema
-    assert "angle" in job.schema["properties"]
-    assert "axis" in job.schema["properties"]
+    assert "properties" in job.schema_
+    assert "angle" in job.schema_["properties"]
+    assert "axis" in job.schema_["properties"]
 
 
 def test_job_manager_listen_yields_extension_instance(client):
@@ -272,6 +269,7 @@ def test_job_manager_claim_until_empty(client):
 
 def test_job_manager_heartbeat(client):
     """JobManager.heartbeat() should update worker timestamp."""
+
     api = MockClientApi(client)
     manager = JobManager(api)
 
@@ -279,13 +277,14 @@ def test_job_manager_heartbeat(client):
     class HeartbeatJob(Extension):
         category: ClassVar[Category] = Category.MODIFIER
 
-    manager._worker_id = "test_worker_id"  # Set worker ID directly
+    # The worker_id was set during register - use that
+    assert manager.worker_id is not None
 
     # First heartbeat
     manager.heartbeat()
 
-    # Verify heartbeat was recorded
-    response = client.patch("/v1/joblib/workers/test_worker_id")
+    # Verify heartbeat was recorded by calling again
+    response = client.patch(f"/v1/joblib/workers/{manager.worker_id}")
     assert response.status_code == 200
 
 
@@ -304,7 +303,9 @@ def test_job_manager_complete_workflow(client):
     for i in range(2):
         resp = client.post(
             "/v1/joblib/rooms/room_1/tasks/@global:modifiers:ProcessData",
-            json={"payload": {"input_file": f"in{i}.txt", "output_file": f"out{i}.txt"}},
+            json={
+                "payload": {"input_file": f"in{i}.txt", "output_file": f"out{i}.txt"}
+            },
         )
         task = TaskResponse.model_validate(resp.json())
         assert task.status.value == "pending"
@@ -334,9 +335,8 @@ def test_job_manager_complete_workflow(client):
 
     # 6. No more tasks - claim should return None
     assert manager.claim() is None
-    
-    # TODO 7. validate finished tasks have completed_at
 
+    # TODO 7. validate finished tasks have completed_at
 
 
 def test_job_manager_claimed_task_has_metadata(client):
