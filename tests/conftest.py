@@ -1,10 +1,12 @@
 # tests/conftest.py
 """Shared test fixtures for DRY tests."""
 
+import asyncio
 import uuid
 from typing import AsyncGenerator
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -63,6 +65,12 @@ async def async_session_factory(async_engine):
 
 
 @pytest.fixture
+def test_db_lock():
+    """Create a fresh lock for each test (bound to test's event loop)."""
+    return asyncio.Lock()
+
+
+@pytest.fixture
 def db_session(async_session_factory):
     """Return an async session generator for dependency injection."""
 
@@ -71,6 +79,21 @@ def db_session(async_session_factory):
             yield session
 
     return get_test_session
+
+
+@pytest.fixture
+def locked_db_session(async_session_factory, test_db_lock):
+    """Return a locked async session generator for dependency injection.
+
+    This serializes all database access to prevent SQLite concurrency issues.
+    """
+
+    async def get_locked_test_session() -> AsyncGenerator[AsyncSession, None]:
+        async with test_db_lock:
+            async with async_session_factory() as session:
+                yield session
+
+    return get_locked_test_session
 
 
 @pytest.fixture
@@ -84,14 +107,16 @@ def mock_current_user(test_user):
 
 
 @pytest.fixture
-def app(db_session, mock_current_user):
+def app(db_session, locked_db_session, mock_current_user):
     """Create a FastAPI app with dependency overrides."""
     from zndraw_auth import current_active_user, current_superuser, get_async_session
+    from zndraw_joblib.dependencies import get_locked_async_session
 
     app = FastAPI()
     app.include_router(router)
     app.add_exception_handler(ProblemException, problem_exception_handler)
     app.dependency_overrides[get_async_session] = db_session
+    app.dependency_overrides[get_locked_async_session] = locked_db_session
     app.dependency_overrides[current_active_user] = mock_current_user
     app.dependency_overrides[current_superuser] = mock_current_user
     return app
@@ -117,9 +142,10 @@ def seeded_client(client):
 
 
 @pytest.fixture
-def client_factory(async_session_factory):
+def client_factory(async_session_factory, test_db_lock):
     """Factory to create clients with different user identities."""
     from zndraw_auth import current_active_user, current_superuser, get_async_session
+    from zndraw_joblib.dependencies import get_locked_async_session
 
     def create_client(identity: str, is_superuser: bool = True) -> TestClient:
         # Create a unique user ID for each identity
@@ -139,10 +165,16 @@ def client_factory(async_session_factory):
             async with async_session_factory() as session:
                 yield session
 
+        async def get_locked_test_session() -> AsyncGenerator[AsyncSession, None]:
+            async with test_db_lock:
+                async with async_session_factory() as session:
+                    yield session
+
         app = FastAPI()
         app.include_router(router)
         app.add_exception_handler(ProblemException, problem_exception_handler)
         app.dependency_overrides[get_async_session] = get_test_session
+        app.dependency_overrides[get_locked_async_session] = get_locked_test_session
         app.dependency_overrides[current_active_user] = get_current_user
         app.dependency_overrides[current_superuser] = get_current_user
 
@@ -152,3 +184,13 @@ def client_factory(async_session_factory):
         return test_client
 
     return create_client
+
+
+@pytest.fixture
+async def async_client(app):
+    """Async HTTP client for concurrent stress testing."""
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        yield client

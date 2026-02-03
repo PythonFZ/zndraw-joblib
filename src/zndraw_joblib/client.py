@@ -175,10 +175,17 @@ class JobManager:
         Attempt to claim a single task.
 
         Returns ClaimedTask with the Extension instance, or None if no tasks available.
+
+        Raises:
+            ValueError: If worker_id is not set. Call create_worker() or register a job first.
         """
+        if self._worker_id is None:
+            raise ValueError("Worker ID not set. Call create_worker() or register a job first.")
+
         response = self.api.http.post(
             f"{self.api.base_url}/v1/joblib/tasks/claim",
             headers=self.api.get_headers(),
+            json={"worker_id": str(self._worker_id)},
         )
         claim_response = TaskClaimResponse.model_validate(response.json())
 

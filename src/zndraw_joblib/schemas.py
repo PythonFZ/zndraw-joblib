@@ -68,6 +68,10 @@ class TaskResponse(BaseModel):
     queue_position: Optional[int] = None
 
 
+class TaskClaimRequest(BaseModel):
+    worker_id: UUID
+
+
 class TaskClaimResponse(BaseModel):
     task: Optional[TaskResponse] = None
 

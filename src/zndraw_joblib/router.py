@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from zndraw_auth import User, current_active_user, current_superuser, get_async_session
 
-from zndraw_joblib.dependencies import get_settings
+from zndraw_joblib.dependencies import get_settings, get_locked_async_session
 from zndraw_joblib.exceptions import (
     InvalidCategory,
     InvalidRoomId,
@@ -29,6 +29,7 @@ from zndraw_joblib.schemas import (
     JobSummary,
     TaskSubmitRequest,
     TaskResponse,
+    TaskClaimRequest,
     TaskClaimResponse,
     TaskUpdateRequest,
     WorkerSummary,
@@ -40,6 +41,7 @@ from zndraw_joblib.settings import JobLibSettings
 CurrentUserDep = Annotated[User, Depends(current_active_user)]
 SuperUserDep = Annotated[User, Depends(current_superuser)]
 SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
+LockedSessionDep = Annotated[AsyncSession, Depends(get_locked_async_session)]
 SettingsDep = Annotated[JobLibSettings, Depends(get_settings)]
 
 # Valid status transitions
@@ -85,7 +87,7 @@ def validate_room_id(room_id: str) -> None:
     "/workers", response_model=WorkerResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_worker(
-    session: SessionDep,
+    session: LockedSessionDep,
     user: CurrentUserDep,
 ):
     """Create a new worker for the authenticated user.
@@ -109,7 +111,7 @@ async def register_job(
     room_id: str,
     request: JobRegisterRequest,
     response: Response,
-    session: SessionDep,
+    session: LockedSessionDep,
     user: CurrentUserDep,
     settings: SettingsDep,
 ):
@@ -496,7 +498,7 @@ async def submit_task(
     job_name: str,
     request: TaskSubmitRequest,
     response: Response,
-    session: SessionDep,
+    session: LockedSessionDep,
     user: CurrentUserDep,
 ):
     """Submit a task for processing."""
@@ -569,55 +571,87 @@ async def submit_task(
 
 @router.post("/tasks/claim", response_model=TaskClaimResponse)
 async def claim_task(
-    session: SessionDep,
+    request: TaskClaimRequest,
+    session: LockedSessionDep,
     user: CurrentUserDep,
+    settings: SettingsDep,
 ):
-    """Claim the oldest pending task for jobs the worker is registered for."""
-    # Find all workers belonging to this user
-    result = await session.execute(select(Worker).where(Worker.user_id == user.id))
-    workers = result.scalars().all()
-    worker_ids = [w.id for w in workers]
-
-    if not worker_ids:
-        return TaskClaimResponse(task=None)
-
-    # Find job IDs for all user's workers
+    """Claim the oldest pending task for jobs the specified worker is registered for."""
+    # Validate that worker_id exists and belongs to the authenticated user
     result = await session.execute(
-        select(WorkerJobLink.job_id).where(WorkerJobLink.worker_id.in_(worker_ids))
+        select(Worker).where(Worker.id == request.worker_id)
+    )
+    worker = result.scalar_one_or_none()
+
+    if not worker:
+        raise WorkerNotFound.exception(f"Worker {request.worker_id} not found")
+
+    if worker.user_id != user.id:
+        raise Forbidden.exception("Worker belongs to a different user")
+
+    # Find job IDs for this specific worker
+    result = await session.execute(
+        select(WorkerJobLink.job_id).where(WorkerJobLink.worker_id == request.worker_id)
     )
     worker_job_ids = result.scalars().all()
 
     if not worker_job_ids:
         return TaskClaimResponse(task=None)
 
-    # Find oldest pending task
-    result = await session.execute(
-        select(Task)
-        .where(Task.job_id.in_(worker_job_ids), Task.status == TaskStatus.PENDING)
-        .order_by(Task.created_at.asc())
-        .limit(1)
-    )
-    task = result.scalar_one_or_none()
+    # Use atomic UPDATE with WHERE clause for optimistic locking
+    # This handles the race condition where multiple workers try to claim the same task
+    import random
+    from sqlalchemy import update
+    from sqlalchemy.exc import OperationalError
 
-    if not task:
+    max_attempts = settings.claim_max_attempts
+    base_delay = settings.claim_base_delay_seconds
+    claimed_task_id = None
+
+    for attempt in range(max_attempts):
+        try:
+            # Find oldest pending task for jobs this worker is registered for
+            result = await session.execute(
+                select(Task.id)
+                .where(Task.job_id.in_(worker_job_ids), Task.status == TaskStatus.PENDING)
+                .order_by(Task.created_at.asc())
+                .limit(1)
+            )
+            task_id = result.scalar_one_or_none()
+
+            if not task_id:
+                return TaskClaimResponse(task=None)
+
+            # Atomically update only if still PENDING (optimistic locking)
+            stmt = (
+                update(Task)
+                .where(Task.id == task_id, Task.status == TaskStatus.PENDING)
+                .values(status=TaskStatus.CLAIMED, worker_id=request.worker_id)
+            )
+            cursor_result = await session.execute(stmt)
+            await session.commit()
+
+            # Check if we actually claimed it (rowcount == 1 means success)
+            if cursor_result.rowcount == 1:
+                claimed_task_id = task_id
+                break
+
+            # Another worker claimed it first - exponential backoff with jitter
+            delay = base_delay * (2 ** attempt) * (0.5 + random.random())
+            await asyncio.sleep(delay)
+
+        except OperationalError:
+            # Database locked/timeout - rollback and retry with backoff
+            await session.rollback()
+            delay = base_delay * (2 ** attempt) * (0.5 + random.random())
+            await asyncio.sleep(delay)
+
+    if not claimed_task_id:
         return TaskClaimResponse(task=None)
 
-    # Find which worker is linked to this job
-    result = await session.execute(
-        select(WorkerJobLink).where(
-            WorkerJobLink.job_id == task.job_id,
-            WorkerJobLink.worker_id.in_(worker_ids),
-        )
-    )
-    link = result.scalar_one_or_none()
-    claiming_worker_id = link.worker_id if link else worker_ids[0]
-
-    # Claim the task
-    task.status = TaskStatus.CLAIMED
-    task.worker_id = claiming_worker_id
-    session.add(task)
-    await session.commit()
-    await session.refresh(task)
+    # Fetch the claimed task
+    result = await session.execute(select(Task).where(Task.id == claimed_task_id))
+    task = result.scalar_one()
 
     # Get job for full name
     result = await session.execute(select(Job).where(Job.id == task.job_id))
@@ -710,7 +744,7 @@ async def get_task_status(
 async def update_task_status(
     task_id: UUID,
     request: TaskUpdateRequest,
-    session: SessionDep,
+    session: LockedSessionDep,
 ):
     """Update task status."""
     result = await session.execute(select(Task).where(Task.id == task_id))
@@ -742,27 +776,29 @@ async def update_task_status(
     # Check for orphan job cleanup (no workers and no non-terminal tasks)
     if request.status in TERMINAL_STATES:
         job_id = task.job_id
+        # Check if ANY workers are registered for this job (may be multiple)
         result = await session.execute(
             select(WorkerJobLink).where(WorkerJobLink.job_id == job_id)
         )
-        remaining_workers = result.scalar_one_or_none()
+        has_workers = result.scalars().first() is not None
 
-        if not remaining_workers:
+        if not has_workers:
             # No workers - check if any non-terminal tasks remain
             non_terminal_statuses = {
                 TaskStatus.PENDING,
                 TaskStatus.CLAIMED,
                 TaskStatus.RUNNING,
             }
+            # Check if ANY non-terminal tasks remain (may be multiple)
             result = await session.execute(
                 select(Task).where(
                     Task.job_id == job_id,
                     Task.status.in_(non_terminal_statuses),
                 )
             )
-            non_terminal_task = result.scalar_one_or_none()
+            has_non_terminal_tasks = result.scalars().first() is not None
 
-            if not non_terminal_task:
+            if not has_non_terminal_tasks:
                 # Job is orphan - delete all tasks then the job
                 result = await session.execute(
                     select(Task).where(Task.job_id == job_id)
@@ -850,7 +886,7 @@ async def list_workers(
 @router.patch("/workers/{worker_id}", response_model=WorkerResponse)
 async def worker_heartbeat(
     worker_id: UUID,
-    session: SessionDep,
+    session: LockedSessionDep,
     user: CurrentUserDep,
 ):
     """Update worker heartbeat. Worker must belong to authenticated user."""
@@ -873,7 +909,7 @@ async def worker_heartbeat(
 @router.delete("/workers/{worker_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_worker(
     worker_id: UUID,
-    session: SessionDep,
+    session: LockedSessionDep,
     user: CurrentUserDep,
 ):
     """Delete worker, fail their tasks, remove job links, and clean up orphan jobs.
