@@ -286,6 +286,70 @@ async def list_tasks_for_room(
     return result
 
 
+@router.get("/rooms/{room_id}/jobs/{job_name:path}/tasks", response_model=list[TaskSummary])
+async def list_tasks_for_job(
+    room_id: str,
+    job_name: str,
+    status: Optional[TaskStatus] = None,
+    db: Session = Depends(get_db_session),
+):
+    """List tasks for a specific job. Includes queue position for pending tasks."""
+    validate_room_id(room_id)
+
+    # Parse job_name
+    parts = job_name.split(":", 2)
+    if len(parts) != 3:
+        raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
+
+    job_room_id, category, name = parts
+
+    # Validate access (same logic as get_job)
+    if room_id != "@global" and job_room_id not in ("@global", room_id):
+        raise JobNotFound.exception(detail=f"Job '{job_name}' not accessible from room '{room_id}'")
+
+    job = db.exec(
+        select(Job).where(
+            Job.room_id == job_room_id,
+            Job.category == category,
+            Job.name == name,
+        )
+    ).first()
+
+    if not job or job.deleted:
+        raise JobNotFound.exception(detail=f"Job '{job_name}' not found")
+
+    query = select(Task).where(Task.job_id == job.id)
+    if status:
+        query = query.where(Task.status == status)
+    query = query.order_by(Task.created_at.asc())
+
+    tasks = db.exec(query).all()
+
+    result = []
+    for task in tasks:
+        queue_position = None
+        if task.status == TaskStatus.PENDING:
+            count = db.exec(
+                select(Task).where(
+                    Task.job_id == task.job_id,
+                    Task.status == TaskStatus.PENDING,
+                    Task.created_at < task.created_at,
+                )
+            ).all()
+            queue_position = len(count) + 1
+
+        result.append(
+            TaskSummary(
+                id=task.id,
+                job_name=job.full_name,
+                status=task.status,
+                created_at=task.created_at,
+                queue_position=queue_position,
+            )
+        )
+    return result
+
+
 @router.get("/rooms/{room_id}/jobs/{job_name:path}", response_model=JobResponse)
 async def get_job(
     room_id: str,

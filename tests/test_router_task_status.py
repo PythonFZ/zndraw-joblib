@@ -266,3 +266,49 @@ def test_list_tasks_for_room_includes_queue_position(seeded_client):
     assert task_map[task1.json()["id"]]["queue_position"] == 1
     assert task_map[task2.json()["id"]]["queue_position"] == 2
     assert task_map[task3.json()["id"]]["queue_position"] == 3
+
+
+def test_list_tasks_for_job_empty(seeded_client):
+    """List tasks for job returns empty list when no tasks exist."""
+    response = seeded_client.get("/v1/joblib/rooms/@global/jobs/@global:modifiers:Rotate/tasks")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_tasks_for_job_filters_by_job(client_factory):
+    """List tasks for job only returns tasks for that specific job."""
+    client = client_factory("worker-a")
+
+    # Register two jobs
+    client.put("/v1/joblib/rooms/room1/jobs", json={"category": "modifiers", "name": "job1", "schema": {}})
+    client.put("/v1/joblib/rooms/room1/jobs", json={"category": "modifiers", "name": "job2", "schema": {}})
+
+    # Submit tasks to both jobs
+    task1 = client.post("/v1/joblib/rooms/room1/tasks/room1:modifiers:job1", json={"payload": {"data": 1}})
+    task2 = client.post("/v1/joblib/rooms/room1/tasks/room1:modifiers:job2", json={"payload": {"data": 2}})
+
+    response = client.get("/v1/joblib/rooms/room1/jobs/room1:modifiers:job1/tasks")
+    assert response.status_code == 200
+    tasks = response.json()
+    assert len(tasks) == 1
+    assert tasks[0]["id"] == task1.json()["id"]
+
+
+def test_list_tasks_for_job_not_found(client):
+    """List tasks for non-existent job returns 404."""
+    response = client.get("/v1/joblib/rooms/room1/jobs/room1:modifiers:nonexistent/tasks")
+    assert response.status_code == 404
+
+
+def test_list_tasks_for_global_job_from_room(seeded_client):
+    """Can list tasks for @global job from any room."""
+    # seeded_client has @global:modifiers:Rotate registered
+
+    # Submit task from room_1 to global job
+    task1 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 1}})
+
+    response = seeded_client.get("/v1/joblib/rooms/room_1/jobs/@global:modifiers:Rotate/tasks")
+    assert response.status_code == 200
+    tasks = response.json()
+    assert len(tasks) == 1
+    assert tasks[0]["id"] == task1.json()["id"]
