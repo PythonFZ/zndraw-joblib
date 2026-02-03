@@ -312,3 +312,31 @@ def test_list_tasks_for_global_job_from_room(seeded_client):
     tasks = response.json()
     assert len(tasks) == 1
     assert tasks[0]["id"] == task1.json()["id"]
+
+
+def test_get_task_includes_queue_position(seeded_client):
+    """GET /tasks/{task_id} includes queue_position for pending tasks."""
+    # Submit 3 tasks
+    task1 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 1}})
+    task2 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 2}})
+    task3 = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 3}})
+
+    # Check queue positions
+    resp1 = seeded_client.get(f"/v1/joblib/tasks/{task1.json()['id']}")
+    resp2 = seeded_client.get(f"/v1/joblib/tasks/{task2.json()['id']}")
+    resp3 = seeded_client.get(f"/v1/joblib/tasks/{task3.json()['id']}")
+
+    assert resp1.json()["queue_position"] == 1
+    assert resp2.json()["queue_position"] == 2
+    assert resp3.json()["queue_position"] == 3
+
+
+def test_get_task_queue_position_null_for_non_pending(seeded_client):
+    """GET /tasks/{task_id} returns null queue_position for non-pending tasks."""
+    task = seeded_client.post("/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate", json={"payload": {"data": 1}})
+
+    # Cancel the task
+    seeded_client.patch(f"/v1/joblib/tasks/{task.json()['id']}", json={"status": "cancelled"})
+
+    response = seeded_client.get(f"/v1/joblib/tasks/{task.json()['id']}")
+    assert response.json()["queue_position"] is None

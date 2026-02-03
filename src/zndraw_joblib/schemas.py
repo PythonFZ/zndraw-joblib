@@ -51,6 +51,7 @@ class TaskResponse(BaseModel):
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
     payload: dict[str, Any] = {}
+    queue_position: Optional[int] = None
 
 
 class TaskSummary(BaseModel):

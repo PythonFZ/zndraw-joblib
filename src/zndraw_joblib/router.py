@@ -526,6 +526,18 @@ async def get_task_status(
 
     job = db.exec(select(Job).where(Job.id == task.job_id)).first()
 
+    # Calculate queue position for pending tasks
+    queue_position = None
+    if task.status == TaskStatus.PENDING:
+        count = db.exec(
+            select(Task).where(
+                Task.job_id == task.job_id,
+                Task.status == TaskStatus.PENDING,
+                Task.created_at < task.created_at,
+            )
+        ).all()
+        queue_position = len(count) + 1
+
     return TaskResponse(
         id=task.id,
         job_name=job.full_name if job else "",
@@ -536,6 +548,7 @@ async def get_task_status(
         completed_at=task.completed_at,
         error=task.error,
         payload=task.payload,
+        queue_position=queue_position,
     )
 
 
