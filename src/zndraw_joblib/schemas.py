@@ -49,17 +49,10 @@ class TaskResponse(BaseModel):
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    worker_id: Optional[str] = None
     error: Optional[str] = None
     payload: dict[str, Any] = {}
     queue_position: Optional[int] = None
-
-
-class TaskSummary(BaseModel):
-    id: UUID
-    job_name: str
-    status: TaskStatus
-    created_at: datetime
-    queue_position: Optional[int] = None  # Only set for PENDING tasks
 
 
 class TaskClaimResponse(BaseModel):

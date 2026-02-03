@@ -34,7 +34,6 @@ from zndraw_joblib.schemas import (
     TaskSubmitRequest,
     TaskResponse,
     TaskClaimResponse,
-    TaskSummary,
     TaskUpdateRequest,
     WorkerSummary,
 )
@@ -260,7 +259,7 @@ async def list_workers_for_room(
     return result
 
 
-@router.get("/rooms/{room_id}/tasks", response_model=list[TaskSummary])
+@router.get("/rooms/{room_id}/tasks", response_model=list[TaskResponse])
 async def list_tasks_for_room(
     room_id: str,
     status: Optional[TaskStatus] = None,
@@ -292,18 +291,24 @@ async def list_tasks_for_room(
             queue_position = len(count) + 1
 
         result.append(
-            TaskSummary(
+            TaskResponse(
                 id=task.id,
                 job_name=job.full_name if job else "",
+                room_id=task.room_id,
                 status=task.status,
                 created_at=task.created_at,
+                started_at=task.started_at,
+                completed_at=task.completed_at,
+                worker_id=task.worker_id,
+                error=task.error,
+                payload=task.payload,
                 queue_position=queue_position,
             )
         )
     return result
 
 
-@router.get("/rooms/{room_id}/jobs/{job_name:path}/tasks", response_model=list[TaskSummary])
+@router.get("/rooms/{room_id}/jobs/{job_name:path}/tasks", response_model=list[TaskResponse])
 async def list_tasks_for_job(
     room_id: str,
     job_name: str,
@@ -356,11 +361,17 @@ async def list_tasks_for_job(
             queue_position = len(count) + 1
 
         result.append(
-            TaskSummary(
+            TaskResponse(
                 id=task.id,
                 job_name=job.full_name,
+                room_id=task.room_id,
                 status=task.status,
                 created_at=task.created_at,
+                started_at=task.started_at,
+                completed_at=task.completed_at,
+                worker_id=task.worker_id,
+                error=task.error,
+                payload=task.payload,
                 queue_position=queue_position,
             )
         )
@@ -487,6 +498,7 @@ async def submit_task(
         room_id=task.room_id,
         status=task.status,
         created_at=task.created_at,
+        worker_id=task.worker_id,
         payload=task.payload,
         queue_position=queue_position,
     )
@@ -537,6 +549,7 @@ async def claim_task(
             created_at=task.created_at,
             started_at=task.started_at,
             completed_at=task.completed_at,
+            worker_id=task.worker_id,
             error=task.error,
             payload=task.payload,
             queue_position=None,  # Claimed tasks are not in queue
@@ -599,6 +612,7 @@ async def get_task_status(
         created_at=task.created_at,
         started_at=task.started_at,
         completed_at=task.completed_at,
+        worker_id=task.worker_id,
         error=task.error,
         payload=task.payload,
         queue_position=queue_position,
@@ -674,6 +688,7 @@ async def update_task_status(
                     created_at=task.created_at,
                     started_at=task.started_at,
                     completed_at=task.completed_at,
+                    worker_id=task.worker_id,
                     error=task.error,
                     payload=task.payload,
                     queue_position=None,  # Terminal state, not in queue
@@ -701,6 +716,7 @@ async def update_task_status(
         created_at=task.created_at,
         started_at=task.started_at,
         completed_at=task.completed_at,
+        worker_id=task.worker_id,
         error=task.error,
         payload=task.payload,
         queue_position=queue_position,
