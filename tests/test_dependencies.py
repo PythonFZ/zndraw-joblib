@@ -2,7 +2,6 @@
 import pytest
 from zndraw_joblib.dependencies import (
     get_db_session,
-    get_redis_client,
     get_current_identity,
     get_is_admin,
     get_settings,
@@ -15,12 +14,6 @@ async def test_get_db_session_raises_not_implemented():
     with pytest.raises(NotImplementedError, match="Dependency not configured"):
         async for _ in get_db_session():
             pass
-
-
-@pytest.mark.asyncio
-async def test_get_redis_client_raises_not_implemented():
-    with pytest.raises(NotImplementedError, match="Dependency not configured"):
-        await get_redis_client()
 
 
 @pytest.mark.asyncio
