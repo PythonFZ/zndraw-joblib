@@ -1,4 +1,6 @@
 # src/zndraw_joblib/router.py
+import asyncio
+import re
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -49,6 +51,20 @@ VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
 }
 
 TERMINAL_STATES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+
+
+def parse_prefer_wait(prefer_header: str | None) -> int | None:
+    """
+    Parse RFC 7240 Prefer header for wait directive.
+    Returns seconds to wait, or None if not specified.
+    """
+    if not prefer_header:
+        return None
+    match = re.search(r'\bwait=(\d+)\b', prefer_header)
+    if match:
+        return int(match.group(1))
+    return None
+
 
 router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
 
