@@ -198,3 +198,32 @@ def test_worker_delete_soft_deletes_job_but_keeps_task(seeded_client):
     assert task_data.payload == {"test": "data"}
     # Job name should still be available from the soft-deleted job
     assert task_data.job_name == "@global:modifiers:Rotate"
+
+
+def test_list_workers_empty(client):
+    """List workers returns empty list when no workers exist."""
+    response = client.get("/v1/joblib/workers")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_workers_returns_all(client_factory):
+    """List workers returns all workers with job counts."""
+    client1 = client_factory("worker-a")
+    client2 = client_factory("worker-b")
+
+    # Worker A registers two jobs
+    client1.put("/v1/joblib/rooms/@global/jobs", json={"category": "modifiers", "name": "job1", "schema": {}})
+    client1.put("/v1/joblib/rooms/@global/jobs", json={"category": "modifiers", "name": "job2", "schema": {}})
+
+    # Worker B registers one job
+    client2.put("/v1/joblib/rooms/@global/jobs", json={"category": "modifiers", "name": "job3", "schema": {}})
+
+    response = client1.get("/v1/joblib/workers")
+    assert response.status_code == 200
+    workers = response.json()
+    assert len(workers) == 2
+
+    worker_map = {w["id"]: w for w in workers}
+    assert worker_map["worker-a"]["job_count"] == 2
+    assert worker_map["worker-b"]["job_count"] == 1

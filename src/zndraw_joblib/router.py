@@ -32,6 +32,7 @@ from zndraw_joblib.schemas import (
     TaskResponse,
     TaskClaimResponse,
     TaskUpdateRequest,
+    WorkerSummary,
 )
 from zndraw_joblib.settings import JobLibSettings
 
@@ -475,6 +476,27 @@ async def update_task_status(
 class WorkerResponse(PydanticBaseModel):
     id: str
     last_heartbeat: datetime
+
+
+@router.get("/workers", response_model=list[WorkerSummary])
+async def list_workers(
+    db: Session = Depends(get_db_session),
+):
+    """List all workers with their job counts."""
+    workers = db.exec(select(Worker)).all()
+    result = []
+    for worker in workers:
+        job_count = len(
+            db.exec(select(WorkerJobLink).where(WorkerJobLink.worker_id == worker.id)).all()
+        )
+        result.append(
+            WorkerSummary(
+                id=worker.id,
+                last_heartbeat=worker.last_heartbeat,
+                job_count=job_count,
+            )
+        )
+    return result
 
 
 @router.patch("/workers/{worker_id}", response_model=WorkerResponse)
