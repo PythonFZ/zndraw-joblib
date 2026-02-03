@@ -453,6 +453,16 @@ async def submit_task(
     response.headers["Location"] = f"/v1/joblib/tasks/{task.id}"
     response.headers["Retry-After"] = "1"
 
+    # Calculate queue position
+    count = db.exec(
+        select(Task).where(
+            Task.job_id == job.id,
+            Task.status == TaskStatus.PENDING,
+            Task.created_at < task.created_at,
+        )
+    ).all()
+    queue_position = len(count) + 1
+
     return TaskResponse(
         id=task.id,
         job_name=job.full_name,
@@ -460,6 +470,7 @@ async def submit_task(
         status=task.status,
         created_at=task.created_at,
         payload=task.payload,
+        queue_position=queue_position,
     )
 
 
@@ -510,6 +521,7 @@ async def claim_task(
             completed_at=task.completed_at,
             error=task.error,
             payload=task.payload,
+            queue_position=None,  # Claimed tasks are not in queue
         )
     )
 
@@ -628,9 +640,22 @@ async def update_task_status(
                     completed_at=task.completed_at,
                     error=task.error,
                     payload=task.payload,
+                    queue_position=None,  # Terminal state, not in queue
                 )
 
     job = db.exec(select(Job).where(Job.id == task.job_id)).first()
+
+    # Calculate queue position if task is still pending
+    queue_position = None
+    if task.status == TaskStatus.PENDING:
+        count = db.exec(
+            select(Task).where(
+                Task.job_id == task.job_id,
+                Task.status == TaskStatus.PENDING,
+                Task.created_at < task.created_at,
+            )
+        ).all()
+        queue_position = len(count) + 1
 
     return TaskResponse(
         id=task.id,
@@ -642,6 +667,7 @@ async def update_task_status(
         completed_at=task.completed_at,
         error=task.error,
         payload=task.payload,
+        queue_position=queue_position,
     )
 
 
