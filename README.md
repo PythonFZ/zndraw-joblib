@@ -1,6 +1,6 @@
 # ZnDraw Job Management Library
 
-A self-contained FastAPI package for distributed job/task management with SQL persistence and Redis pub/sub.
+A self-contained FastAPI package for distributed job/task management with SQL persistence.
 
 ## Integration into your APP
 
@@ -10,7 +10,7 @@ import asyncio
 from fastapi import FastAPI
 from zndraw_joblib.router import router
 from zndraw_joblib.dependencies import (
-    get_db_session, get_redis_client, get_current_identity, get_is_admin
+    get_db_session, get_current_identity, get_is_admin
 )
 from zndraw_joblib.exceptions import ProblemException, problem_exception_handler
 from zndraw_joblib.sweeper import run_cleanup_sweeper
@@ -19,9 +19,6 @@ from zndraw_joblib.sweeper import run_cleanup_sweeper
 async def my_real_db_session():
     async with async_session_maker() as session:
         yield session
-
-async def my_real_redis():
-    return global_redis_pool
 
 async def my_get_current_identity(token: str = Depends(oauth2_scheme)) -> str:
     payload = decode_jwt(token)
@@ -35,7 +32,6 @@ app = FastAPI()
 
 # 2. Inject your infra into the package
 app.dependency_overrides[get_db_session] = my_real_db_session
-app.dependency_overrides[get_redis_client] = my_real_redis
 app.dependency_overrides[get_current_identity] = my_get_current_identity
 app.dependency_overrides[get_is_admin] = my_get_is_admin
 
@@ -205,7 +201,6 @@ Valid transitions:
 - `running` → `completed` | `failed`
 - Any → `cancelled`
 
-On terminal states, publishes to Redis channel `zndraw_joblib:task:{task_id}`.
 
 ### Worker Heartbeat
 
@@ -308,9 +303,10 @@ class Task(SQLModel, table=True):
 ## Long-Polling
 
 `GET /v1/joblib/tasks/{task_id}` with `Prefer: wait=N`:
-- Server subscribes to Redis pub/sub channel `zndraw_joblib:task:{task_id}`
+- Server polls database until task reaches terminal state or timeout
 - Returns immediately on terminal state (`completed`, `failed`, `cancelled`)
 - Returns `Preference-Applied: wait` header if honored
+- Maximum wait capped by `settings.long_poll_max_wait_seconds`
 
 ## Background Sweeper
 
