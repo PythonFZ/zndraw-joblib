@@ -10,7 +10,7 @@ from typing import Callable, AsyncGenerator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from zndraw_joblib.models import Worker, Task, TaskStatus, Job, WorkerJobLink
+from zndraw_joblib.models import Worker, Task, TaskStatus, Job, WorkerJobLink, TERMINAL_STATUSES
 from zndraw_joblib.settings import JobLibSettings
 
 logger = logging.getLogger(__name__)
@@ -21,8 +21,6 @@ async def _soft_delete_orphan_job(session: AsyncSession, job_id: uuid.UUID) -> N
 
     Note: Does NOT commit the transaction - caller must commit.
     """
-    non_terminal_statuses = {TaskStatus.PENDING, TaskStatus.CLAIMED, TaskStatus.RUNNING}
-
     # Check if job has any remaining workers
     result = await session.execute(
         select(WorkerJobLink).where(WorkerJobLink.job_id == job_id).limit(1)
@@ -35,7 +33,7 @@ async def _soft_delete_orphan_job(session: AsyncSession, job_id: uuid.UUID) -> N
         select(Task)
         .where(
             Task.job_id == job_id,
-            Task.status.in_(non_terminal_statuses),
+            Task.status.not_in(TERMINAL_STATUSES),
         )
         .limit(1)
     )

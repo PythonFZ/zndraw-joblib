@@ -20,6 +20,9 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+TERMINAL_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+
+
 class WorkerJobLink(Base):
     """Bare M:N link between Worker and Job."""
 

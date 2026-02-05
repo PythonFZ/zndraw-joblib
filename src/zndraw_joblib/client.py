@@ -1,6 +1,7 @@
 # src/zndraw_joblib/client.py
 """Client SDK for ZnDraw JobLib workers."""
 
+import logging
 import time
 from enum import Enum
 from typing import ClassVar, Generic, Iterator, Protocol, TypeVar
@@ -14,6 +15,8 @@ from zndraw_joblib.schemas import (
     TaskSubmitRequest,
     TaskClaimResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class Category(str, Enum):
@@ -167,7 +170,7 @@ class JobManager:
             self._worker_id = UUID(data["worker_id"])
 
         if resp.status_code == 200:
-            print(f"Already registered: {full_name}")
+            logger.info("Already registered: %s", full_name)
         self._registry[full_name] = cls
 
     def claim(self) -> ClaimedTask | None:

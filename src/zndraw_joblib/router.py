@@ -1,12 +1,14 @@
 # src/zndraw_joblib/router.py
 import asyncio
+import random
 import re
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from zndraw_auth import User, current_active_user, current_superuser, get_async_session
 
@@ -21,7 +23,7 @@ from zndraw_joblib.exceptions import (
     TaskNotFound,
     InvalidTaskTransition,
 )
-from zndraw_joblib.models import Job, Worker, WorkerJobLink, Task, TaskStatus
+from zndraw_joblib.models import Job, Worker, WorkerJobLink, Task, TaskStatus, TERMINAL_STATUSES
 from zndraw_joblib.sweeper import _cleanup_worker, _soft_delete_orphan_job
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
@@ -54,7 +56,6 @@ VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
     TaskStatus.CANCELLED: set(),
 }
 
-TERMINAL_STATES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
 
 
 def parse_prefer_wait(prefer_header: str | None) -> int | None:
@@ -68,6 +69,63 @@ def parse_prefer_wait(prefer_header: str | None) -> int | None:
     if match:
         return int(match.group(1))
     return None
+
+
+async def _queue_position(session: AsyncSession, task: Task) -> int | None:
+    if task.status != TaskStatus.PENDING:
+        return None
+    result = await session.execute(
+        select(func.count())
+        .select_from(Task)
+        .where(
+            Task.job_id == task.job_id,
+            Task.status == TaskStatus.PENDING,
+            Task.created_at < task.created_at,
+        )
+    )
+    return result.scalar() + 1
+
+
+async def _resolve_job(
+    session: AsyncSession, job_name: str, room_id: str
+) -> Job:
+    parts = job_name.split(":", 2)
+    if len(parts) != 3:
+        raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
+    job_room_id, category, name = parts
+    if room_id != "@global" and job_room_id not in ("@global", room_id):
+        raise JobNotFound.exception(
+            detail=f"Job '{job_name}' not accessible from room '{room_id}'"
+        )
+    result = await session.execute(
+        select(Job).where(
+            Job.room_id == job_room_id,
+            Job.category == category,
+            Job.name == name,
+        )
+    )
+    job = result.scalar_one_or_none()
+    if not job or job.deleted:
+        raise JobNotFound.exception(detail=f"Job '{job_name}' not found")
+    return job
+
+
+async def _task_response(session: AsyncSession, task: Task) -> TaskResponse:
+    result = await session.execute(select(Job).where(Job.id == task.job_id))
+    job = result.scalar_one_or_none()
+    return TaskResponse(
+        id=task.id,
+        job_name=job.full_name if job else "",
+        room_id=task.room_id,
+        status=task.status,
+        created_at=task.created_at,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+        worker_id=task.worker_id,
+        error=task.error,
+        payload=task.payload,
+        queue_position=await _queue_position(session, task),
+    )
 
 
 router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
@@ -325,39 +383,7 @@ async def list_tasks_for_room(
     result = await session.execute(query)
     tasks = result.scalars().all()
 
-    results = []
-    for task in tasks:
-        result = await session.execute(select(Job).where(Job.id == task.job_id))
-        job = result.scalar_one_or_none()
-
-        queue_position = None
-        if task.status == TaskStatus.PENDING:
-            result = await session.execute(
-                select(Task).where(
-                    Task.job_id == task.job_id,
-                    Task.status == TaskStatus.PENDING,
-                    Task.created_at < task.created_at,
-                )
-            )
-            count = len(result.scalars().all())
-            queue_position = count + 1
-
-        results.append(
-            TaskResponse(
-                id=task.id,
-                job_name=job.full_name if job else "",
-                room_id=task.room_id,
-                status=task.status,
-                created_at=task.created_at,
-                started_at=task.started_at,
-                completed_at=task.completed_at,
-                worker_id=task.worker_id,
-                error=task.error,
-                payload=task.payload,
-                queue_position=queue_position,
-            )
-        )
-    return results
+    return [await _task_response(session, task) for task in tasks]
 
 
 @router.get(
@@ -372,30 +398,7 @@ async def list_tasks_for_job(
     """List tasks for a specific job. Includes queue position for pending tasks."""
     validate_room_id(room_id)
 
-    # Parse job_name
-    parts = job_name.split(":", 2)
-    if len(parts) != 3:
-        raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
-
-    job_room_id, category, name = parts
-
-    # Validate access (same logic as get_job)
-    if room_id != "@global" and job_room_id not in ("@global", room_id):
-        raise JobNotFound.exception(
-            detail=f"Job '{job_name}' not accessible from room '{room_id}'"
-        )
-
-    result = await session.execute(
-        select(Job).where(
-            Job.room_id == job_room_id,
-            Job.category == category,
-            Job.name == name,
-        )
-    )
-    job = result.scalar_one_or_none()
-
-    if not job or job.deleted:
-        raise JobNotFound.exception(detail=f"Job '{job_name}' not found")
+    job = await _resolve_job(session, job_name, room_id)
 
     query = select(Task).where(Task.job_id == job.id)
     if status:
@@ -405,36 +408,7 @@ async def list_tasks_for_job(
     result = await session.execute(query)
     tasks = result.scalars().all()
 
-    results = []
-    for task in tasks:
-        queue_position = None
-        if task.status == TaskStatus.PENDING:
-            result = await session.execute(
-                select(Task).where(
-                    Task.job_id == task.job_id,
-                    Task.status == TaskStatus.PENDING,
-                    Task.created_at < task.created_at,
-                )
-            )
-            count = len(result.scalars().all())
-            queue_position = count + 1
-
-        results.append(
-            TaskResponse(
-                id=task.id,
-                job_name=job.full_name,
-                room_id=task.room_id,
-                status=task.status,
-                created_at=task.created_at,
-                started_at=task.started_at,
-                completed_at=task.completed_at,
-                worker_id=task.worker_id,
-                error=task.error,
-                payload=task.payload,
-                queue_position=queue_position,
-            )
-        )
-    return results
+    return [await _task_response(session, task) for task in tasks]
 
 
 @router.get("/rooms/{room_id}/jobs/{job_name:path}", response_model=JobResponse)
@@ -446,30 +420,7 @@ async def get_job(
     """Get job details by full name."""
     validate_room_id(room_id)
 
-    # Parse job_name: room_id:category:name
-    parts = job_name.split(":", 2)
-    if len(parts) != 3:
-        raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
-
-    job_room_id, category, name = parts
-
-    # For room requests, allow access to both @global and room-specific jobs
-    if room_id != "@global" and job_room_id not in ("@global", room_id):
-        raise JobNotFound.exception(
-            detail=f"Job '{job_name}' not accessible from room '{room_id}'"
-        )
-
-    result = await session.execute(
-        select(Job).where(
-            Job.room_id == job_room_id,
-            Job.category == category,
-            Job.name == name,
-        )
-    )
-    job = result.scalar_one_or_none()
-
-    if not job or job.deleted:
-        raise JobNotFound.exception(detail=f"Job '{job_name}' not found")
+    job = await _resolve_job(session, job_name, room_id)
 
     result = await session.execute(
         select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)
@@ -504,31 +455,7 @@ async def submit_task(
     """Submit a task for processing."""
     validate_room_id(room_id)
 
-    # Parse job_name
-    parts = job_name.split(":", 2)
-    if len(parts) != 3:
-        raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
-
-    job_room_id, category, name = parts
-
-    # Find the job
-    result = await session.execute(
-        select(Job).where(
-            Job.room_id == job_room_id,
-            Job.category == category,
-            Job.name == name,
-        )
-    )
-    job = result.scalar_one_or_none()
-
-    if not job or job.deleted:
-        raise JobNotFound.exception(detail=f"Job '{job_name}' not found")
-
-    # For private jobs, ensure room matches
-    if job_room_id != "@global" and job_room_id != room_id:
-        raise JobNotFound.exception(
-            detail=f"Job '{job_name}' not accessible from room '{room_id}'"
-        )
+    job = await _resolve_job(session, job_name, room_id)
 
     # Create task
     task = Task(
@@ -546,27 +473,7 @@ async def submit_task(
     response.headers["Location"] = f"/v1/joblib/tasks/{task.id}"
     response.headers["Retry-After"] = "1"
 
-    # Calculate queue position
-    result = await session.execute(
-        select(Task).where(
-            Task.job_id == job.id,
-            Task.status == TaskStatus.PENDING,
-            Task.created_at < task.created_at,
-        )
-    )
-    count = len(result.scalars().all())
-    queue_position = count + 1
-
-    return TaskResponse(
-        id=task.id,
-        job_name=job.full_name,
-        room_id=task.room_id,
-        status=task.status,
-        created_at=task.created_at,
-        worker_id=task.worker_id,
-        payload=task.payload,
-        queue_position=queue_position,
-    )
+    return await _task_response(session, task)
 
 
 @router.post("/tasks/claim", response_model=TaskClaimResponse)
@@ -600,10 +507,6 @@ async def claim_task(
 
     # Use atomic UPDATE with WHERE clause for optimistic locking
     # This handles the race condition where multiple workers try to claim the same task
-    import random
-    from sqlalchemy import update
-    from sqlalchemy.exc import OperationalError
-
     max_attempts = settings.claim_max_attempts
     base_delay = settings.claim_base_delay_seconds
     claimed_task_id = None
@@ -653,25 +556,7 @@ async def claim_task(
     result = await session.execute(select(Task).where(Task.id == claimed_task_id))
     task = result.scalar_one()
 
-    # Get job for full name
-    result = await session.execute(select(Job).where(Job.id == task.job_id))
-    job = result.scalar_one_or_none()
-
-    return TaskClaimResponse(
-        task=TaskResponse(
-            id=task.id,
-            job_name=job.full_name if job else "",
-            room_id=task.room_id,
-            status=task.status,
-            created_at=task.created_at,
-            started_at=task.started_at,
-            completed_at=task.completed_at,
-            worker_id=task.worker_id,
-            error=task.error,
-            payload=task.payload,
-            queue_position=None,  # Claimed tasks are not in queue
-        )
-    )
+    return TaskClaimResponse(task=await _task_response(session, task))
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
@@ -691,17 +576,17 @@ async def get_task_status(
     requested_wait = parse_prefer_wait(prefer)
 
     # Only long-poll if wait requested AND task not in terminal state
-    if requested_wait and requested_wait > 0 and task.status not in TERMINAL_STATES:
+    if requested_wait and requested_wait > 0 and task.status not in TERMINAL_STATUSES:
         effective_wait = min(requested_wait, settings.long_poll_max_wait_seconds)
         elapsed = 0.0
         poll_interval = 1.0  # Check DB every second
 
-        while elapsed < effective_wait and task.status not in TERMINAL_STATES:
+        while elapsed < effective_wait and task.status not in TERMINAL_STATUSES:
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
             # Re-fetch task from DB
-            session.expire_all()
+            session.expire(task)
             result = await session.execute(select(Task).where(Task.id == task_id))
             task = result.scalar_one_or_none()
             if not task:
@@ -709,35 +594,7 @@ async def get_task_status(
 
         response.headers["Preference-Applied"] = f"wait={int(effective_wait)}"
 
-    result = await session.execute(select(Job).where(Job.id == task.job_id))
-    job = result.scalar_one_or_none()
-
-    # Calculate queue position for pending tasks
-    queue_position = None
-    if task.status == TaskStatus.PENDING:
-        result = await session.execute(
-            select(Task).where(
-                Task.job_id == task.job_id,
-                Task.status == TaskStatus.PENDING,
-                Task.created_at < task.created_at,
-            )
-        )
-        count = len(result.scalars().all())
-        queue_position = count + 1
-
-    return TaskResponse(
-        id=task.id,
-        job_name=job.full_name if job else "",
-        room_id=task.room_id,
-        status=task.status,
-        created_at=task.created_at,
-        started_at=task.started_at,
-        completed_at=task.completed_at,
-        worker_id=task.worker_id,
-        error=task.error,
-        payload=task.payload,
-        queue_position=queue_position,
-    )
+    return await _task_response(session, task)
 
 
 @router.patch("/tasks/{task_id}", response_model=TaskResponse)
@@ -764,7 +621,7 @@ async def update_task_status(
 
     if request.status == TaskStatus.RUNNING:
         task.started_at = now
-    elif request.status in TERMINAL_STATES:
+    elif request.status in TERMINAL_STATUSES:
         task.completed_at = now
         if request.error:
             task.error = request.error
@@ -774,39 +631,11 @@ async def update_task_status(
     await session.refresh(task)
 
     # Soft-delete orphan job if task reached terminal state
-    if request.status in TERMINAL_STATES:
+    if request.status in TERMINAL_STATUSES:
         await _soft_delete_orphan_job(session, task.job_id)
         await session.commit()
 
-    result = await session.execute(select(Job).where(Job.id == task.job_id))
-    job = result.scalar_one_or_none()
-
-    # Calculate queue position if task is still pending
-    queue_position = None
-    if task.status == TaskStatus.PENDING:
-        result = await session.execute(
-            select(Task).where(
-                Task.job_id == task.job_id,
-                Task.status == TaskStatus.PENDING,
-                Task.created_at < task.created_at,
-            )
-        )
-        count = len(result.scalars().all())
-        queue_position = count + 1
-
-    return TaskResponse(
-        id=task.id,
-        job_name=job.full_name if job else "",
-        room_id=task.room_id,
-        status=task.status,
-        created_at=task.created_at,
-        started_at=task.started_at,
-        completed_at=task.completed_at,
-        worker_id=task.worker_id,
-        error=task.error,
-        payload=task.payload,
-        queue_position=queue_position,
-    )
+    return await _task_response(session, task)
 
 
 @router.get("/workers", response_model=list[WorkerSummary])

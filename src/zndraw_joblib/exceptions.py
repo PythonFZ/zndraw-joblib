@@ -2,7 +2,7 @@
 """RFC 9457 Problem Details for HTTP APIs."""
 
 import re
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -54,19 +54,6 @@ class ProblemType:
         return f"/v1/problems/{cls.problem_id()}"
 
     @classmethod
-    def openapi_response(
-        cls, description: str | None = None
-    ) -> dict[int | str, dict[str, Any]]:
-        """Generate OpenAPI response entry for this problem type."""
-        return {
-            cls.status: {
-                "model": ProblemDetail,
-                "description": description
-                or (cls.__doc__.split("\n")[0] if cls.__doc__ else cls.title),
-            }
-        }
-
-    @classmethod
     def create(
         cls, detail: str | None = None, instance: str | None = None
     ) -> ProblemDetail:
@@ -92,7 +79,8 @@ class ProblemType:
 
 async def problem_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
     """Convert ProblemException to RFC 9457 compliant JSON response."""
-    assert isinstance(exc, ProblemException)
+    if not isinstance(exc, ProblemException):
+        raise TypeError(f"Expected ProblemException, got {type(exc).__name__}")
     return JSONResponse(
         status_code=exc.problem.status,
         content=exc.problem.model_dump(exclude_none=True),
