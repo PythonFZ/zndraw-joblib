@@ -458,6 +458,58 @@ def test_get_task_with_prefer_wait_sets_preference_applied(seeded_client):
     assert response.headers.get("Preference-Applied") == "wait=1"
 
 
+def test_orphan_job_soft_deleted_on_task_completion(client_factory):
+    """When last task completes and no workers remain, job is soft-deleted (not hard-deleted).
+
+    The task should still exist and the response should include the real job_name.
+    """
+    client = client_factory("worker-orphan")
+
+    # 1. Register a job + worker
+    reg_resp = client.put(
+        "/v1/joblib/rooms/room_x/jobs",
+        json={"category": "modifiers", "name": "OrphanTest", "schema": {}},
+    )
+    assert reg_resp.status_code == 201
+    worker_id = reg_resp.json()["worker_id"]
+
+    # 2. Submit a task
+    submit_resp = client.post(
+        "/v1/joblib/rooms/room_x/tasks/room_x:modifiers:OrphanTest",
+        json={"payload": {"key": "value"}},
+    )
+    assert submit_resp.status_code == 202
+    task_id = submit_resp.json()["id"]
+
+    # 3. Delete the worker (orphan check skipped because pending task exists)
+    del_resp = client.delete(f"/v1/joblib/workers/{worker_id}")
+    assert del_resp.status_code == 204
+
+    # Job should still be visible (pending task prevents soft-delete)
+    job_resp = client.get("/v1/joblib/rooms/room_x/jobs/room_x:modifiers:OrphanTest")
+    assert job_resp.status_code == 200
+
+    # 4. Cancel the task (terminal state triggers orphan check in update_task_status)
+    patch_resp = client.patch(
+        f"/v1/joblib/tasks/{task_id}",
+        json={"status": "cancelled"},
+    )
+    assert patch_resp.status_code == 200
+    task_data = patch_resp.json()
+
+    # Assert: task response has real job_name (not "")
+    assert task_data["job_name"] == "room_x:modifiers:OrphanTest"
+
+    # Assert: job returns 404 (soft-deleted, filtered by query)
+    job_resp2 = client.get("/v1/joblib/rooms/room_x/jobs/room_x:modifiers:OrphanTest")
+    assert job_resp2.status_code == 404
+
+    # Assert: task is still retrievable (not hard-deleted)
+    get_resp = client.get(f"/v1/joblib/tasks/{task_id}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["status"] == "cancelled"
+
+
 def test_parse_prefer_wait_various_formats():
     """Test Prefer header parsing."""
     from zndraw_joblib.router import parse_prefer_wait

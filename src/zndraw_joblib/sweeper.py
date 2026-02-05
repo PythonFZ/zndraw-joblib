@@ -3,6 +3,7 @@
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Callable, AsyncGenerator
 
@@ -13,6 +14,40 @@ from zndraw_joblib.models import Worker, Task, TaskStatus, Job, WorkerJobLink
 from zndraw_joblib.settings import JobLibSettings
 
 logger = logging.getLogger(__name__)
+
+
+async def _soft_delete_orphan_job(session: AsyncSession, job_id: uuid.UUID) -> None:
+    """Soft-delete a job if it has no workers and no non-terminal tasks.
+
+    Note: Does NOT commit the transaction - caller must commit.
+    """
+    non_terminal_statuses = {TaskStatus.PENDING, TaskStatus.CLAIMED, TaskStatus.RUNNING}
+
+    # Check if job has any remaining workers
+    result = await session.execute(
+        select(WorkerJobLink).where(WorkerJobLink.job_id == job_id).limit(1)
+    )
+    if result.scalar_one_or_none():
+        return  # Job still has workers
+
+    # Check if job has any non-terminal tasks
+    result = await session.execute(
+        select(Task)
+        .where(
+            Task.job_id == job_id,
+            Task.status.in_(non_terminal_statuses),
+        )
+        .limit(1)
+    )
+    if result.scalar_one_or_none():
+        return  # Job has pending/running tasks
+
+    # Job is orphan - soft delete (tasks remain as historical records)
+    result = await session.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if job:
+        job.deleted = True
+        session.add(job)
 
 
 async def _cleanup_worker(session: AsyncSession, worker: Worker) -> None:
@@ -53,35 +88,8 @@ async def _cleanup_worker(session: AsyncSession, worker: Worker) -> None:
     await session.flush()
 
     # Clean up orphan jobs (no workers and no non-terminal tasks)
-    non_terminal_statuses = {TaskStatus.PENDING, TaskStatus.CLAIMED, TaskStatus.RUNNING}
     for job_id in job_ids:
-        # Check if job has any remaining workers
-        result = await session.execute(
-            select(WorkerJobLink).where(WorkerJobLink.job_id == job_id).limit(1)
-        )
-        remaining_workers = result.scalar_one_or_none()
-        if remaining_workers:
-            continue  # Job still has workers
-
-        # Check if job has any non-terminal tasks
-        result = await session.execute(
-            select(Task)
-            .where(
-                Task.job_id == job_id,
-                Task.status.in_(non_terminal_statuses),
-            )
-            .limit(1)
-        )
-        non_terminal_task = result.scalar_one_or_none()
-        if non_terminal_task:
-            continue  # Job has pending/running tasks
-
-        # Job is orphan - soft delete (tasks remain as historical records)
-        result = await session.execute(select(Job).where(Job.id == job_id))
-        job = result.scalar_one_or_none()
-        if job:
-            job.deleted = True
-            session.add(job)
+        await _soft_delete_orphan_job(session, job_id)
 
 
 async def cleanup_stale_workers(session: AsyncSession, timeout: timedelta) -> int:

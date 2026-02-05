@@ -22,7 +22,7 @@ from zndraw_joblib.exceptions import (
     InvalidTaskTransition,
 )
 from zndraw_joblib.models import Job, Worker, WorkerJobLink, Task, TaskStatus
-from zndraw_joblib.sweeper import _cleanup_worker
+from zndraw_joblib.sweeper import _cleanup_worker, _soft_delete_orphan_job
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
     JobResponse,
@@ -773,60 +773,10 @@ async def update_task_status(
     await session.commit()
     await session.refresh(task)
 
-    # Check for orphan job cleanup (no workers and no non-terminal tasks)
+    # Soft-delete orphan job if task reached terminal state
     if request.status in TERMINAL_STATES:
-        job_id = task.job_id
-        # Check if ANY workers are registered for this job (may be multiple)
-        result = await session.execute(
-            select(WorkerJobLink).where(WorkerJobLink.job_id == job_id)
-        )
-        has_workers = result.scalars().first() is not None
-
-        if not has_workers:
-            # No workers - check if any non-terminal tasks remain
-            non_terminal_statuses = {
-                TaskStatus.PENDING,
-                TaskStatus.CLAIMED,
-                TaskStatus.RUNNING,
-            }
-            # Check if ANY non-terminal tasks remain (may be multiple)
-            result = await session.execute(
-                select(Task).where(
-                    Task.job_id == job_id,
-                    Task.status.in_(non_terminal_statuses),
-                )
-            )
-            has_non_terminal_tasks = result.scalars().first() is not None
-
-            if not has_non_terminal_tasks:
-                # Job is orphan - delete all tasks then the job
-                result = await session.execute(
-                    select(Task).where(Task.job_id == job_id)
-                )
-                all_tasks = result.scalars().all()
-                for t in all_tasks:
-                    await session.delete(t)
-
-                result = await session.execute(select(Job).where(Job.id == job_id))
-                job_to_delete = result.scalar_one_or_none()
-                if job_to_delete:
-                    await session.delete(job_to_delete)
-                await session.commit()
-
-                # Return response for the deleted task
-                return TaskResponse(
-                    id=task.id,
-                    job_name="",
-                    room_id=task.room_id,
-                    status=task.status,
-                    created_at=task.created_at,
-                    started_at=task.started_at,
-                    completed_at=task.completed_at,
-                    worker_id=task.worker_id,
-                    error=task.error,
-                    payload=task.payload,
-                    queue_position=None,  # Terminal state, not in queue
-                )
+        await _soft_delete_orphan_job(session, task.job_id)
+        await session.commit()
 
     result = await session.execute(select(Job).where(Job.id == task.job_id))
     job = result.scalar_one_or_none()
