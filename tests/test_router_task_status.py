@@ -283,7 +283,8 @@ def test_update_task_superuser_can_update_any_task(client_factory):
         json={"status": "running"},
     )
     assert response.status_code == 200
-    assert response.json()["status"] == "running"
+    task_data = TaskResponse.model_validate(response.json())
+    assert task_data.status.value == "running"
 
 
 def test_list_tasks_for_room_empty(client):
@@ -494,7 +495,8 @@ def test_get_task_queue_position_null_for_non_pending(seeded_client):
     )
 
     response = seeded_client.get(f"/v1/joblib/tasks/{task.json()['id']}")
-    assert response.json()["queue_position"] is None
+    task_data = TaskResponse.model_validate(response.json())
+    assert task_data.queue_position is None
 
 
 def test_get_task_no_prefer_header_returns_immediately(seeded_client):
@@ -525,7 +527,8 @@ def test_get_task_terminal_state_returns_immediately_despite_prefer(seeded_clien
         f"/v1/joblib/tasks/{task_id}", headers={"Prefer": "wait=30"}
     )
     assert response.status_code == 200
-    assert response.json()["status"] == "cancelled"
+    task_data = TaskResponse.model_validate(response.json())
+    assert task_data.status.value == "cancelled"
     assert "Preference-Applied" not in response.headers
 
 

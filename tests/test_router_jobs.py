@@ -192,3 +192,25 @@ def test_register_job_with_existing_worker(client):
     assert data["worker_id"] == worker_id
     assert len(data["workers"]) == 1
     assert data["workers"][0] == worker_id
+
+
+def test_register_job_global_forbidden_for_non_superuser(client_factory):
+    """Non-superuser should be blocked from registering @global jobs."""
+    client = client_factory("regular-user", is_superuser=False)
+    response = client.put(
+        "/v1/joblib/rooms/@global/jobs",
+        json={"category": "modifiers", "name": "Rotate", "schema": {}},
+    )
+    assert response.status_code == 403
+    error = ProblemDetail.model_validate(response.json())
+    assert error.status == 403
+
+
+def test_register_job_private_room_allowed_for_non_superuser(client_factory):
+    """Non-superuser should be allowed to register jobs in private rooms."""
+    client = client_factory("regular-user", is_superuser=False)
+    response = client.put(
+        "/v1/joblib/rooms/my_room/jobs",
+        json={"category": "modifiers", "name": "Rotate", "schema": {}},
+    )
+    assert response.status_code == 201

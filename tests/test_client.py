@@ -3,6 +3,8 @@
 
 from typing import ClassVar
 
+import pytest
+
 from zndraw_joblib.client import (
     JobManager,
     Extension,
@@ -336,7 +338,8 @@ def test_job_manager_complete_workflow(client):
     # 6. No more tasks - claim should return None
     assert manager.claim() is None
 
-    # TODO 7. validate finished tasks have completed_at
+    # 7. Validate finished tasks have completed_at
+    assert completed.completed_at is not None
 
 
 def test_job_manager_claimed_task_has_metadata(client):
@@ -361,3 +364,43 @@ def test_job_manager_claimed_task_has_metadata(client):
     assert claimed.job_name == "@global:modifiers:MetadataJob"
     assert isinstance(claimed.extension, MetadataJob)
     assert claimed.extension.value == 99
+
+
+def test_job_manager_submit(client):
+    """JobManager.submit() should create a task via the server."""
+    api = MockClientApi(client)
+    manager = JobManager(api)
+
+    @manager.register
+    class SubmitJob(Extension):
+        category: ClassVar[Category] = Category.MODIFIER
+        value: int = 0
+
+    # Submit a task
+    task_id = manager.submit(SubmitJob(value=42), room="submit_room")
+    assert task_id is not None
+
+    # Verify the task exists on the server
+    task_resp = client.get(f"/v1/joblib/tasks/{task_id}")
+    assert task_resp.status_code == 200
+    task = TaskResponse.model_validate(task_resp.json())
+    assert task.payload == {"value": 42}
+    assert task.room_id == "submit_room"
+    assert task.job_name == "@global:modifiers:SubmitJob"
+
+
+def test_job_manager_claim_raises_without_worker_id(client):
+    """claim() should raise ValueError if worker_id is not set."""
+    api = MockClientApi(client)
+    manager = JobManager(api)
+    # Don't register any jobs (so _worker_id stays None)
+    with pytest.raises(ValueError, match="Worker ID not set"):
+        manager.claim()
+
+
+def test_job_manager_heartbeat_raises_without_worker_id(client):
+    """heartbeat() should raise ValueError if worker_id is not set."""
+    api = MockClientApi(client)
+    manager = JobManager(api)
+    with pytest.raises(ValueError, match="Worker ID not set"):
+        manager.heartbeat()

@@ -663,8 +663,10 @@ async def get_task_status(
 
         response.headers["Preference-Applied"] = f"wait={int(effective_wait)}"
 
-    # Build final response
+    # Build final response — re-fetch to avoid stale detached object
     async with session_factory() as session:
+        result = await session.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one()
         return await _task_response(session, task)
 
 

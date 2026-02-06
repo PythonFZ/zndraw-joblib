@@ -11,11 +11,6 @@ from zndraw_joblib.models import Worker, Job, Task, TaskStatus, WorkerJobLink
 from zndraw_joblib.sweeper import cleanup_stale_workers, _cleanup_worker
 
 
-@pytest.fixture
-def test_user_id():
-    """Fixed UUID for test user in sweeper tests."""
-    return uuid.UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
-
 
 @pytest.mark.asyncio
 async def test_cleanup_stale_workers_finds_stale(async_session_factory, test_user_id):

@@ -259,9 +259,9 @@ def test_list_workers_returns_all(client_factory):
     response = client1.get("/v1/joblib/workers")
     assert response.status_code == 200
     page = PaginatedResponse[WorkerSummary].model_validate(response.json())
-    # Note: each registration creates a new worker since no worker_id is passed
-    # So we should have multiple workers
-    assert len(page.items) >= 2
+    # Each registration without worker_id creates a new worker:
+    # client1: 2 workers (job1 + job2), client2: 1 worker (job3)
+    assert len(page.items) == 3
 
 
 def test_list_workers_for_room_empty(client):
@@ -308,8 +308,8 @@ def test_list_workers_for_room_filters_by_room(client_factory):
     assert response.status_code == 200
     page = PaginatedResponse[WorkerSummary].model_validate(response.json())
 
-    # Workers from room1 jobs and @global jobs should be included
-    assert len(page.items) >= 2
+    # Workers from room1 jobs (worker_a1, worker_c1) and @global jobs (worker_a2)
+    assert len(page.items) == 3
 
 
 def test_list_workers_for_global_room(client_factory):
@@ -335,3 +335,48 @@ def test_list_workers_for_global_room(client_factory):
 
     assert worker_a_id in worker_ids
     # worker_b shouldn't be here as it only serves room1
+
+
+def test_worker_heartbeat_forbidden_for_non_owner(client_factory):
+    """Heartbeat should return 403 when called by a different user."""
+    client_owner = client_factory("owner")
+    client_other = client_factory("other")
+
+    # Owner creates a worker
+    resp = client_owner.post("/v1/joblib/workers")
+    assert resp.status_code == 201
+    worker_id = resp.json()["id"]
+
+    # Other user tries to heartbeat
+    response = client_other.patch(f"/v1/joblib/workers/{worker_id}")
+    assert response.status_code == 403
+
+
+def test_worker_delete_forbidden_for_non_owner(client_factory):
+    """Delete should return 403 when called by a non-owner, non-superuser."""
+    client_owner = client_factory("owner")
+    client_other = client_factory("other", is_superuser=False)
+
+    # Owner creates a worker
+    resp = client_owner.post("/v1/joblib/workers")
+    assert resp.status_code == 201
+    worker_id = resp.json()["id"]
+
+    # Non-superuser, non-owner tries to delete
+    response = client_other.delete(f"/v1/joblib/workers/{worker_id}")
+    assert response.status_code == 403
+
+
+def test_worker_delete_allowed_for_superuser(client_factory):
+    """Superuser should be able to delete any worker."""
+    client_owner = client_factory("owner")
+    client_admin = client_factory("admin", is_superuser=True)
+
+    # Owner creates a worker
+    resp = client_owner.post("/v1/joblib/workers")
+    assert resp.status_code == 201
+    worker_id = resp.json()["id"]
+
+    # Superuser can delete it
+    response = client_admin.delete(f"/v1/joblib/workers/{worker_id}")
+    assert response.status_code == 204
