@@ -203,6 +203,89 @@ def test_update_task_invalid_transition_failed_to_running(seeded_client):
     assert error.status == 409
 
 
+def test_update_task_forbidden_for_non_owner(client_factory):
+    """Non-superuser who doesn't own the worker cannot update task status."""
+    owner = client_factory("owner")
+    other = client_factory("other", is_superuser=False)
+
+    # Owner registers job and submits task
+    reg_resp = owner.put(
+        "/v1/joblib/rooms/@global/jobs",
+        json={"category": "modifiers", "name": "AuthTest", "schema": {}},
+    )
+    worker_id = reg_resp.json()["worker_id"]
+
+    owner.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:AuthTest",
+        json={"payload": {}},
+    )
+
+    # Owner claims the task
+    claim_resp = owner.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": worker_id}
+    )
+    task_id = claim_resp.json()["task"]["id"]
+
+    # Other user (non-superuser) tries to update → forbidden
+    response = other.patch(
+        f"/v1/joblib/tasks/{task_id}",
+        json={"status": "running"},
+    )
+    assert response.status_code == 403
+
+
+def test_update_task_forbidden_unclaimed_task_non_superuser(client_factory):
+    """Non-superuser cannot update an unclaimed (pending) task."""
+    owner = client_factory("owner")
+    other = client_factory("other", is_superuser=False)
+
+    owner.put(
+        "/v1/joblib/rooms/@global/jobs",
+        json={"category": "modifiers", "name": "AuthTest2", "schema": {}},
+    )
+    submit_resp = owner.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:AuthTest2",
+        json={"payload": {}},
+    )
+    task_id = submit_resp.json()["id"]
+
+    # Other user tries to cancel unclaimed task → forbidden
+    response = other.patch(
+        f"/v1/joblib/tasks/{task_id}",
+        json={"status": "cancelled"},
+    )
+    assert response.status_code == 403
+
+
+def test_update_task_superuser_can_update_any_task(client_factory):
+    """Superuser can update any task regardless of worker ownership."""
+    owner = client_factory("owner")
+    admin = client_factory("admin", is_superuser=True)
+
+    reg_resp = owner.put(
+        "/v1/joblib/rooms/@global/jobs",
+        json={"category": "modifiers", "name": "AdminTest", "schema": {}},
+    )
+    worker_id = reg_resp.json()["worker_id"]
+
+    owner.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:AdminTest",
+        json={"payload": {}},
+    )
+    claim_resp = owner.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": worker_id}
+    )
+    task_id = claim_resp.json()["task"]["id"]
+
+    # Admin can update the task
+    response = admin.patch(
+        f"/v1/joblib/tasks/{task_id}",
+        json={"status": "running"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+
+
 def test_list_tasks_for_room_empty(client):
     """List tasks for room returns empty list when no tasks exist."""
     response = client.get("/v1/joblib/rooms/my-room/tasks")

@@ -141,6 +141,36 @@ def test_list_jobs_returns_worker_ids(client_factory):
     assert "worker_count" not in job
 
 
+def test_reregister_soft_deleted_job_with_new_schema(client):
+    """Re-registering a soft-deleted job should un-delete it and accept the new schema."""
+    # 1. Register a job
+    resp = client.put(
+        "/v1/joblib/rooms/@global/jobs",
+        json={"category": "modifiers", "name": "Ephemeral", "schema": {"old": True}},
+    )
+    assert resp.status_code == 201
+    worker_id = resp.json()["worker_id"]
+
+    # 2. Delete the worker, which triggers soft-delete of the orphan job
+    del_resp = client.delete(f"/v1/joblib/workers/{worker_id}")
+    assert del_resp.status_code == 204
+
+    # 3. Verify job no longer appears in listing
+    list_resp = client.get("/v1/joblib/rooms/@global/jobs")
+    names = [j["full_name"] for j in list_resp.json()]
+    assert "@global:modifiers:Ephemeral" not in names
+
+    # 4. Re-register with a DIFFERENT schema — should succeed (not 409)
+    resp2 = client.put(
+        "/v1/joblib/rooms/@global/jobs",
+        json={"category": "modifiers", "name": "Ephemeral", "schema": {"new": True}},
+    )
+    assert resp2.status_code == 201
+    data = resp2.json()
+    assert data["schema"] == {"new": True}
+    assert data["full_name"] == "@global:modifiers:Ephemeral"
+
+
 def test_register_job_with_existing_worker(client):
     """Register job with existing worker_id should reuse that worker."""
     # First, create a worker explicitly via POST /workers

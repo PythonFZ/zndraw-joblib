@@ -190,6 +190,7 @@ class JobManager:
             headers=self.api.get_headers(),
             json={"worker_id": str(self._worker_id)},
         )
+        response.raise_for_status()
         claim_response = TaskClaimResponse.model_validate(response.json())
 
         if claim_response.task is None:
@@ -231,10 +232,11 @@ class JobManager:
             raise ValueError(
                 "Worker ID not set. Call create_worker() or register a job first."
             )
-        self.api.http.patch(
+        response = self.api.http.patch(
             f"{self.api.base_url}/v1/joblib/workers/{self._worker_id}",
             headers=self.api.get_headers(),
         )
+        response.raise_for_status()
 
     def submit(
         self, extension: Extension, room: str, *, job_room: str = "@global"

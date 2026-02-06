@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "zndraw-joblib"
 version = "0.1.0"
-description = "Add your description here"
+description = "FastAPI job queue with SQLite-backed persistence for ZnDraw"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,16 +13,12 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
-    "pydantic-socketio",
     "sqlmodel>=0.0.31",
     "zndraw-auth",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/zndraw_joblib"]
-
-[tool.uv.sources]
-pydantic-socketio = { git = "https://github.com/PythonFZ/Pydantic-SocketIO/" }
 
 [dependency-groups]
 dev = [

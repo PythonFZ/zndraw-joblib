@@ -96,7 +96,7 @@ class Task(Base):
 
     room_id: Mapped[str] = mapped_column(String, index=True)
     created_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        default=None, index=True, nullable=True
+        ForeignKey("user.id"), default=None, index=True, nullable=True
     )
 
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

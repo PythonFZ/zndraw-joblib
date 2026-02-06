@@ -108,7 +108,7 @@ async def cleanup_stale_workers(session: AsyncSession, timeout: timedelta) -> in
 
     count = 0
     for worker in stale_workers:
-        logger.info(f"Cleaning up stale worker: {worker.id}")
+        logger.info("Cleaning up stale worker: %s", worker.id)
         await _cleanup_worker(session, worker)
         count += 1
 
@@ -132,7 +132,9 @@ async def run_sweeper(
     interval = settings.sweeper_interval_seconds
 
     logger.info(
-        f"Starting sweeper with interval={interval}s, worker_timeout={settings.worker_timeout_seconds}s"
+        "Starting sweeper with interval=%ss, worker_timeout=%ss",
+        interval,
+        settings.worker_timeout_seconds,
     )
 
     while True:
@@ -141,6 +143,6 @@ async def run_sweeper(
             async for session in get_session():
                 count = await cleanup_stale_workers(session, timeout)
                 if count > 0:
-                    logger.info(f"Cleaned up {count} stale worker(s)")
+                    logger.info("Cleaned up %s stale worker(s)", count)
         except Exception as e:
-            logger.exception(f"Error in sweeper: {e}")
+            logger.exception("Error in sweeper: %s", e)

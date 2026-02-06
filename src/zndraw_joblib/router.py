@@ -197,7 +197,12 @@ async def register_job(
     )
     existing_job = result.scalar_one_or_none()
 
-    if existing_job:
+    if existing_job and existing_job.deleted:
+        # Re-activate soft-deleted job with new schema
+        existing_job.deleted = False
+        existing_job.schema_ = request.schema_
+        job = existing_job
+    elif existing_job:
         # Validate schema match
         if existing_job.schema_ != request.schema_:
             raise SchemaConflict.exception(
@@ -602,12 +607,24 @@ async def update_task_status(
     task_id: UUID,
     request: TaskUpdateRequest,
     session: LockedSessionDep,
+    user: CurrentUserDep,
 ):
-    """Update task status."""
+    """Update task status. Requires the task's worker owner or superuser."""
     result = await session.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
     if not task:
         raise TaskNotFound.exception(detail=f"Task '{task_id}' not found")
+
+    # Authorization: worker owner or superuser
+    if not user.is_superuser:
+        if task.worker_id is None:
+            raise Forbidden.exception(detail="Task not claimed by any worker")
+        result = await session.execute(
+            select(Worker).where(Worker.id == task.worker_id)
+        )
+        worker = result.scalar_one_or_none()
+        if not worker or worker.user_id != user.id:
+            raise Forbidden.exception(detail="Not authorized to update this task")
 
     # Validate transition
     if request.status not in VALID_TRANSITIONS.get(task.status, set()):
