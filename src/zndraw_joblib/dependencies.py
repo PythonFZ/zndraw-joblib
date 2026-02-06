@@ -1,7 +1,8 @@
 # src/zndraw_joblib/dependencies.py
 import asyncio
+from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import Annotated, AsyncGenerator
+from typing import Annotated, AsyncGenerator, Callable
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,23 @@ _db_lock = asyncio.Lock()
 def get_settings() -> JobLibSettings:
     """Returns cached settings instance."""
     return JobLibSettings()
+
+
+async def get_session_factory(
+    auth_settings: Annotated[AuthSettings, Depends(get_auth_settings)],
+) -> Callable:
+    """Returns a factory that creates short-lived async sessions on demand.
+
+    Use this when you need multiple independent sessions within a single
+    request (e.g., long-polling loops where holding a session open is wasteful).
+    """
+
+    @asynccontextmanager
+    async def create_session():
+        async for session in get_async_session(auth_settings):
+            yield session
+
+    return create_session
 
 
 async def get_locked_async_session(

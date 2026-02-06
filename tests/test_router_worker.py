@@ -4,7 +4,7 @@
 import time
 from uuid import UUID
 
-from zndraw_joblib.schemas import JobResponse, TaskResponse, WorkerResponse
+from zndraw_joblib.schemas import JobResponse, TaskResponse, WorkerResponse, WorkerSummary, PaginatedResponse
 from zndraw_joblib.exceptions import ProblemDetail
 
 
@@ -230,7 +230,9 @@ def test_list_workers_empty(client):
     """List workers returns empty list when no workers exist."""
     response = client.get("/v1/joblib/workers")
     assert response.status_code == 200
-    assert response.json() == []
+    page = PaginatedResponse[WorkerSummary].model_validate(response.json())
+    assert page.items == []
+    assert page.total == 0
 
 
 def test_list_workers_returns_all(client_factory):
@@ -256,17 +258,19 @@ def test_list_workers_returns_all(client_factory):
 
     response = client1.get("/v1/joblib/workers")
     assert response.status_code == 200
-    workers = response.json()
+    page = PaginatedResponse[WorkerSummary].model_validate(response.json())
     # Note: each registration creates a new worker since no worker_id is passed
     # So we should have multiple workers
-    assert len(workers) >= 2
+    assert len(page.items) >= 2
 
 
 def test_list_workers_for_room_empty(client):
     """List workers for room returns empty list when no workers."""
     response = client.get("/v1/joblib/rooms/my-room/workers")
     assert response.status_code == 200
-    assert response.json() == []
+    page = PaginatedResponse[WorkerSummary].model_validate(response.json())
+    assert page.items == []
+    assert page.total == 0
 
 
 def test_list_workers_for_room_filters_by_room(client_factory):
@@ -302,10 +306,10 @@ def test_list_workers_for_room_filters_by_room(client_factory):
     # List workers for room1 - should include workers from A and C
     response = client_a.get("/v1/joblib/rooms/room1/workers")
     assert response.status_code == 200
-    workers = response.json()
+    page = PaginatedResponse[WorkerSummary].model_validate(response.json())
 
     # Workers from room1 jobs and @global jobs should be included
-    assert len(workers) >= 2
+    assert len(page.items) >= 2
 
 
 def test_list_workers_for_global_room(client_factory):
@@ -326,8 +330,8 @@ def test_list_workers_for_global_room(client_factory):
 
     response = client_a.get("/v1/joblib/rooms/@global/workers")
     assert response.status_code == 200
-    workers = response.json()
-    worker_ids = {w["id"] for w in workers}
+    page = PaginatedResponse[WorkerSummary].model_validate(response.json())
+    worker_ids = {str(w.id) for w in page.items}
 
     assert worker_a_id in worker_ids
     # worker_b shouldn't be here as it only serves room1

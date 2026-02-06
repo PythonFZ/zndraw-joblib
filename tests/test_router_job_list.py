@@ -2,9 +2,8 @@
 """Tests for job listing and details endpoints using shared fixtures."""
 
 import pytest
-from pydantic import TypeAdapter
 
-from zndraw_joblib.schemas import JobSummary, JobResponse
+from zndraw_joblib.schemas import JobSummary, JobResponse, PaginatedResponse
 from zndraw_joblib.exceptions import ProblemDetail
 
 
@@ -29,9 +28,9 @@ def multi_job_client(client):
 def test_list_jobs_global_only(multi_job_client):
     response = multi_job_client.get("/v1/joblib/rooms/@global/jobs")
     assert response.status_code == 200
-    data = TypeAdapter(list[JobSummary]).validate_python(response.json())
-    assert len(data) == 2
-    names = [j.full_name for j in data]
+    page = PaginatedResponse[JobSummary].model_validate(response.json())
+    assert page.total == 2
+    names = [j.full_name for j in page.items]
     assert "@global:modifiers:Rotate" in names
     assert "@global:selections:All" in names
 
@@ -39,9 +38,9 @@ def test_list_jobs_global_only(multi_job_client):
 def test_list_jobs_room_includes_global(multi_job_client):
     response = multi_job_client.get("/v1/joblib/rooms/room_123/jobs")
     assert response.status_code == 200
-    data = TypeAdapter(list[JobSummary]).validate_python(response.json())
-    assert len(data) == 3  # 2 global + 1 room
-    names = [j.full_name for j in data]
+    page = PaginatedResponse[JobSummary].model_validate(response.json())
+    assert page.total == 3  # 2 global + 1 room
+    names = [j.full_name for j in page.items]
     assert "@global:modifiers:Rotate" in names
     assert "room_123:modifiers:Translate" in names
 

@@ -2,7 +2,7 @@
 """Tests for job registration endpoint using shared fixtures from conftest.py."""
 
 from uuid import UUID
-from zndraw_joblib.schemas import JobResponse
+from zndraw_joblib.schemas import JobResponse, JobSummary, PaginatedResponse
 from zndraw_joblib.exceptions import ProblemDetail
 
 
@@ -133,12 +133,10 @@ def test_list_jobs_returns_worker_ids(client_factory):
     )
 
     response = client1.get("/v1/joblib/rooms/@global/jobs")
-    jobs = response.json()
+    page = PaginatedResponse[JobSummary].model_validate(response.json())
 
-    job = next(j for j in jobs if j["name"] == "TestJob")
-    assert "workers" in job
-    assert len(job["workers"]) == 2  # Two different workers
-    assert "worker_count" not in job
+    job = next(j for j in page.items if j.name == "TestJob")
+    assert len(job.workers) == 2  # Two different workers
 
 
 def test_reregister_soft_deleted_job_with_new_schema(client):
@@ -157,7 +155,8 @@ def test_reregister_soft_deleted_job_with_new_schema(client):
 
     # 3. Verify job no longer appears in listing
     list_resp = client.get("/v1/joblib/rooms/@global/jobs")
-    names = [j["full_name"] for j in list_resp.json()]
+    page = PaginatedResponse[JobSummary].model_validate(list_resp.json())
+    names = [j.full_name for j in page.items]
     assert "@global:modifiers:Ephemeral" not in names
 
     # 4. Re-register with a DIFFERENT schema — should succeed (not 409)

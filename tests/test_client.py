@@ -8,7 +8,7 @@ from zndraw_joblib.client import (
     Extension,
     Category,
 )
-from zndraw_joblib.schemas import JobSummary, JobResponse, TaskResponse
+from zndraw_joblib.schemas import JobSummary, JobResponse, TaskResponse, PaginatedResponse
 
 
 class MockClientApi:
@@ -61,8 +61,8 @@ def test_job_manager_register_modifier(client):
 
     response = client.get("/v1/joblib/rooms/@global/jobs")
     assert response.status_code == 200
-    jobs = [JobSummary.model_validate(j) for j in response.json()]
-    job_names = [j.full_name for j in jobs]
+    page = PaginatedResponse[JobSummary].model_validate(response.json())
+    job_names = [j.full_name for j in page.items]
     assert "@global:modifiers:Rotate" in job_names
 
 
@@ -79,8 +79,8 @@ def test_job_manager_register_selection(client):
 
     response = client.get("/v1/joblib/rooms/@global/jobs")
     assert response.status_code == 200
-    jobs = [JobSummary.model_validate(j) for j in response.json()]
-    job_names = [j.full_name for j in jobs]
+    page = PaginatedResponse[JobSummary].model_validate(response.json())
+    job_names = [j.full_name for j in page.items]
     assert "@global:selections:SelectAll" in job_names
 
 
@@ -98,8 +98,8 @@ def test_job_manager_register_analysis(client):
 
     response = client.get("/v1/joblib/rooms/@global/jobs")
     assert response.status_code == 200
-    jobs = [JobSummary.model_validate(j) for j in response.json()]
-    job_names = [j.full_name for j in jobs]
+    page = PaginatedResponse[JobSummary].model_validate(response.json())
+    job_names = [j.full_name for j in page.items]
     assert "@global:analysis:Measure" in job_names
 
 
@@ -117,8 +117,8 @@ def test_job_manager_register_with_room(client):
 
     response = client.get("/v1/joblib/rooms/my_room/jobs")
     assert response.status_code == 200
-    jobs = [JobSummary.model_validate(j) for j in response.json()]
-    job_names = [j.full_name for j in jobs]
+    page = PaginatedResponse[JobSummary].model_validate(response.json())
+    job_names = [j.full_name for j in page.items]
     assert "my_room:modifiers:PrivateJob" in job_names
 
 

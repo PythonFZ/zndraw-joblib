@@ -6,13 +6,14 @@ from datetime import datetime, timezone
 from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from zndraw_auth import User, current_active_user, current_superuser, get_async_session
 
-from zndraw_joblib.dependencies import get_settings, get_locked_async_session
+from zndraw_joblib.dependencies import get_settings, get_locked_async_session, get_session_factory
 from zndraw_joblib.exceptions import (
     InvalidCategory,
     InvalidRoomId,
@@ -36,6 +37,7 @@ from zndraw_joblib.schemas import (
     TaskUpdateRequest,
     WorkerSummary,
     WorkerResponse,
+    PaginatedResponse,
 )
 from zndraw_joblib.settings import JobLibSettings
 
@@ -45,6 +47,7 @@ SuperUserDep = Annotated[User, Depends(current_superuser)]
 SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
 LockedSessionDep = Annotated[AsyncSession, Depends(get_locked_async_session)]
 SettingsDep = Annotated[JobLibSettings, Depends(get_settings)]
+SessionFactoryDep = Annotated[object, Depends(get_session_factory)]
 
 # Valid status transitions
 VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
@@ -126,6 +129,37 @@ async def _task_response(session: AsyncSession, task: Task) -> TaskResponse:
         payload=task.payload,
         queue_position=await _queue_position(session, task),
     )
+
+
+async def _bulk_task_responses(
+    session: AsyncSession, tasks: list[Task]
+) -> list[TaskResponse]:
+    """Build TaskResponse list efficiently by batching job lookups and queue positions.
+
+    Expects tasks to have been loaded with selectinload(Task.job).
+    """
+    # Compute queue positions for pending tasks
+    queue_positions: dict[UUID, int] = {}
+    for task in tasks:
+        if task.status == TaskStatus.PENDING:
+            queue_positions[task.id] = await _queue_position(session, task)
+
+    return [
+        TaskResponse(
+            id=t.id,
+            job_name=t.job.full_name if t.job else "",
+            room_id=t.room_id,
+            status=t.status,
+            created_at=t.created_at,
+            started_at=t.started_at,
+            completed_at=t.completed_at,
+            worker_id=t.worker_id,
+            error=t.error,
+            payload=t.payload,
+            queue_position=queue_positions.get(t.id),
+        )
+        for t in tasks
+    ]
 
 
 router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
@@ -276,144 +310,173 @@ async def register_job(
     )
 
 
-@router.get("/rooms/{room_id}/jobs", response_model=list[JobSummary])
+@router.get("/rooms/{room_id}/jobs", response_model=PaginatedResponse[JobSummary])
 async def list_jobs(
     room_id: str,
     session: SessionDep,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
     """List jobs for a room. Includes @global jobs unless room_id is @global."""
     validate_room_id(room_id)
 
-    if room_id == "@global":
-        result = await session.execute(
-            select(Job).where(Job.room_id == "@global", Job.deleted.is_(False))
-        )
-    else:
-        result = await session.execute(
-            select(Job).where(
-                (Job.room_id == "@global") | (Job.room_id == room_id),
-                Job.deleted.is_(False),
-            )
-        )
+    base_filter = (
+        Job.room_id == "@global" if room_id == "@global"
+        else (Job.room_id == "@global") | (Job.room_id == room_id)
+    )
+    base_query = select(Job).where(base_filter, Job.deleted.is_(False))
+
+    # Total count
+    total_result = await session.execute(
+        select(func.count()).select_from(base_query.subquery())
+    )
+    total = total_result.scalar()
+
+    # Paginated + eager-load workers
+    result = await session.execute(
+        base_query.options(selectinload(Job.workers))
+        .offset(offset).limit(limit)
+    )
     jobs = result.scalars().all()
 
-    results = []
-    for job in jobs:
-        result = await session.execute(
-            select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)
+    items = [
+        JobSummary(
+            full_name=job.full_name,
+            category=job.category,
+            name=job.name,
+            workers=[w.id for w in job.workers],
         )
-        worker_links = result.scalars().all()
-        worker_ids = [link.worker_id for link in worker_links]
-        results.append(
-            JobSummary(
-                full_name=job.full_name,
-                category=job.category,
-                name=job.name,
-                workers=worker_ids,
-            )
-        )
-    return results
+        for job in jobs
+    ]
+    return PaginatedResponse(items=items, total=total, limit=limit, offset=offset)
 
 
-@router.get("/rooms/{room_id}/workers", response_model=list[WorkerSummary])
+@router.get("/rooms/{room_id}/workers", response_model=PaginatedResponse[WorkerSummary])
 async def list_workers_for_room(
     room_id: str,
     session: SessionDep,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
     """List workers serving jobs in a room. Includes @global workers unless room_id is @global."""
     validate_room_id(room_id)
 
     # Find jobs for this room (and @global if not requesting @global specifically)
-    if room_id == "@global":
-        result = await session.execute(
-            select(Job).where(Job.room_id == "@global", Job.deleted.is_(False))
-        )
-    else:
-        result = await session.execute(
-            select(Job).where(
-                (Job.room_id == "@global") | (Job.room_id == room_id),
-                Job.deleted.is_(False),
-            )
-        )
-    jobs = result.scalars().all()
-
-    job_ids = [job.id for job in jobs]
-    if not job_ids:
-        return []
-
-    # Find workers linked to these jobs
+    base_filter = (
+        Job.room_id == "@global" if room_id == "@global"
+        else (Job.room_id == "@global") | (Job.room_id == room_id)
+    )
     result = await session.execute(
+        select(Job.id).where(base_filter, Job.deleted.is_(False))
+    )
+    job_ids = result.scalars().all()
+
+    if not job_ids:
+        return PaginatedResponse(items=[], total=0, limit=limit, offset=offset)
+
+    # Find distinct worker IDs linked to these jobs
+    worker_id_query = (
         select(WorkerJobLink.worker_id)
         .where(WorkerJobLink.job_id.in_(job_ids))
         .distinct()
     )
-    worker_ids = result.scalars().all()
 
-    if not worker_ids:
-        return []
+    # Total count
+    total_result = await session.execute(
+        select(func.count()).select_from(worker_id_query.subquery())
+    )
+    total = total_result.scalar()
 
-    result = await session.execute(select(Worker).where(Worker.id.in_(worker_ids)))
+    # Paginated workers with eager-loaded jobs
+    result = await session.execute(
+        select(Worker)
+        .where(Worker.id.in_(worker_id_query))
+        .options(selectinload(Worker.jobs))
+        .offset(offset).limit(limit)
+    )
     workers = result.scalars().all()
 
-    results = []
-    for worker in workers:
-        result = await session.execute(
-            select(WorkerJobLink).where(WorkerJobLink.worker_id == worker.id)
+    items = [
+        WorkerSummary(
+            id=worker.id,
+            last_heartbeat=worker.last_heartbeat,
+            job_count=len(worker.jobs),
         )
-        job_count = len(result.scalars().all())
-        results.append(
-            WorkerSummary(
-                id=worker.id,
-                last_heartbeat=worker.last_heartbeat,
-                job_count=job_count,
-            )
-        )
-    return results
+        for worker in workers
+    ]
+    return PaginatedResponse(items=items, total=total, limit=limit, offset=offset)
 
 
-@router.get("/rooms/{room_id}/tasks", response_model=list[TaskResponse])
+@router.get("/rooms/{room_id}/tasks", response_model=PaginatedResponse[TaskResponse])
 async def list_tasks_for_room(
     room_id: str,
     session: SessionDep,
     status: Optional[TaskStatus] = None,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
     """List tasks for a room, optionally filtered by status. Includes queue position for pending tasks."""
     validate_room_id(room_id)
 
-    query = select(Task).where(Task.room_id == room_id)
+    base_query = select(Task).where(Task.room_id == room_id)
     if status:
-        query = query.where(Task.status == status)
-    query = query.order_by(Task.created_at.asc())
+        base_query = base_query.where(Task.status == status)
 
-    result = await session.execute(query)
+    # Total count
+    total_result = await session.execute(
+        select(func.count()).select_from(base_query.subquery())
+    )
+    total = total_result.scalar()
+
+    # Paginated + eager-load job relationship
+    result = await session.execute(
+        base_query.options(selectinload(Task.job))
+        .order_by(Task.created_at.asc())
+        .offset(offset).limit(limit)
+    )
     tasks = result.scalars().all()
 
-    return [await _task_response(session, task) for task in tasks]
+    items = await _bulk_task_responses(session, tasks)
+    return PaginatedResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get(
-    "/rooms/{room_id}/jobs/{job_name:path}/tasks", response_model=list[TaskResponse]
+    "/rooms/{room_id}/jobs/{job_name:path}/tasks",
+    response_model=PaginatedResponse[TaskResponse],
 )
 async def list_tasks_for_job(
     room_id: str,
     job_name: str,
     session: SessionDep,
     status: Optional[TaskStatus] = None,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
     """List tasks for a specific job. Includes queue position for pending tasks."""
     validate_room_id(room_id)
 
     job = await _resolve_job(session, job_name, room_id)
 
-    query = select(Task).where(Task.job_id == job.id)
+    base_query = select(Task).where(Task.job_id == job.id)
     if status:
-        query = query.where(Task.status == status)
-    query = query.order_by(Task.created_at.asc())
+        base_query = base_query.where(Task.status == status)
 
-    result = await session.execute(query)
+    # Total count
+    total_result = await session.execute(
+        select(func.count()).select_from(base_query.subquery())
+    )
+    total = total_result.scalar()
+
+    # Paginated + eager-load job relationship
+    result = await session.execute(
+        base_query.options(selectinload(Task.job))
+        .order_by(Task.created_at.asc())
+        .offset(offset).limit(limit)
+    )
     tasks = result.scalars().all()
 
-    return [await _task_response(session, task) for task in tasks]
+    items = await _bulk_task_responses(session, tasks)
+    return PaginatedResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/rooms/{room_id}/jobs/{job_name:path}", response_model=JobResponse)
@@ -568,15 +631,17 @@ async def claim_task(
 async def get_task_status(
     task_id: UUID,
     response: Response,
-    session: SessionDep,
+    session_factory: SessionFactoryDep,
     settings: SettingsDep,
     prefer: str | None = Header(None),
 ):
-    """Get task status."""
-    result = await session.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-    if not task:
-        raise TaskNotFound.exception(detail=f"Task '{task_id}' not found")
+    """Get task status. Supports long-polling via Prefer: wait=N header."""
+    # Initial lookup
+    async with session_factory() as session:
+        result = await session.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one_or_none()
+        if not task:
+            raise TaskNotFound.exception(detail=f"Task '{task_id}' not found")
 
     requested_wait = parse_prefer_wait(prefer)
 
@@ -590,16 +655,17 @@ async def get_task_status(
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
-            # Re-fetch task from DB
-            session.expire(task)
-            result = await session.execute(select(Task).where(Task.id == task_id))
-            task = result.scalar_one_or_none()
-            if not task:
-                raise TaskNotFound.exception(detail=f"Task '{task_id}' not found")
+            async with session_factory() as session:
+                result = await session.execute(select(Task).where(Task.id == task_id))
+                task = result.scalar_one_or_none()
+                if not task:
+                    raise TaskNotFound.exception(detail=f"Task '{task_id}' not found")
 
         response.headers["Preference-Applied"] = f"wait={int(effective_wait)}"
 
-    return await _task_response(session, task)
+    # Build final response
+    async with session_factory() as session:
+        return await _task_response(session, task)
 
 
 @router.patch("/tasks/{task_id}", response_model=TaskResponse)
@@ -655,28 +721,33 @@ async def update_task_status(
     return await _task_response(session, task)
 
 
-@router.get("/workers", response_model=list[WorkerSummary])
+@router.get("/workers", response_model=PaginatedResponse[WorkerSummary])
 async def list_workers(
     session: SessionDep,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
     """List all workers with their job counts."""
-    result = await session.execute(select(Worker))
+    # Total count
+    total_result = await session.execute(select(func.count()).select_from(Worker))
+    total = total_result.scalar()
+
+    # Paginated + eager-load jobs
+    result = await session.execute(
+        select(Worker).options(selectinload(Worker.jobs))
+        .offset(offset).limit(limit)
+    )
     workers = result.scalars().all()
 
-    results = []
-    for worker in workers:
-        result = await session.execute(
-            select(WorkerJobLink).where(WorkerJobLink.worker_id == worker.id)
+    items = [
+        WorkerSummary(
+            id=worker.id,
+            last_heartbeat=worker.last_heartbeat,
+            job_count=len(worker.jobs),
         )
-        job_count = len(result.scalars().all())
-        results.append(
-            WorkerSummary(
-                id=worker.id,
-                last_heartbeat=worker.last_heartbeat,
-                job_count=job_count,
-            )
-        )
-    return results
+        for worker in workers
+    ]
+    return PaginatedResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.patch("/workers/{worker_id}", response_model=WorkerResponse)

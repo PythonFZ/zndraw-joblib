@@ -16,6 +16,7 @@ from zndraw_joblib.exceptions import (
     InvalidRoomId,
     Forbidden,
 )
+from zndraw_joblib.schemas import PaginatedResponse
 from zndraw_joblib.settings import JobLibSettings
 from zndraw_joblib.client import JobManager, ClaimedTask, Extension, Category
 from zndraw_joblib.sweeper import run_sweeper, cleanup_stale_workers
@@ -42,6 +43,8 @@ __all__ = [
     "InvalidTaskTransition",
     "InvalidRoomId",
     "Forbidden",
+    # Schemas
+    "PaginatedResponse",
     # Settings
     "JobLibSettings",
     # Client

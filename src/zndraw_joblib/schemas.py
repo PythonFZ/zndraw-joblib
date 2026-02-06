@@ -1,6 +1,6 @@
 # src/zndraw_joblib/schemas.py
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Generic, Optional, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -79,3 +79,13 @@ class TaskClaimResponse(BaseModel):
 class TaskUpdateRequest(BaseModel):
     status: TaskStatus
     error: Optional[str] = None
+
+
+T = TypeVar("T")
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
+    total: int
+    limit: int
+    offset: int

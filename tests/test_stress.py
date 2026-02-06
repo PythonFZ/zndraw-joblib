@@ -5,6 +5,8 @@ import asyncio
 
 import pytest
 
+from zndraw_joblib.schemas import TaskResponse, PaginatedResponse
+
 
 @pytest.mark.asyncio
 async def test_concurrent_task_submissions(async_client):
@@ -31,10 +33,11 @@ async def test_concurrent_task_submissions(async_client):
     assert all(r.status_code == 202 for r in responses)
 
     # Verify all tasks exist
-    list_resp = await async_client.get("/v1/joblib/rooms/stress_room/tasks")
+    list_resp = await async_client.get("/v1/joblib/rooms/stress_room/tasks?limit=200")
     assert list_resp.status_code == 200
-    tasks = list_resp.json()
-    assert len(tasks) == 100
+    page = PaginatedResponse[TaskResponse].model_validate(list_resp.json())
+    assert page.total == 100
+    assert len(page.items) == 100
 
 
 @pytest.mark.asyncio

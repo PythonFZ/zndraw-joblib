@@ -3,7 +3,7 @@
 
 from uuid import uuid4
 
-from zndraw_joblib.schemas import TaskResponse, TaskClaimResponse
+from zndraw_joblib.schemas import TaskResponse, TaskClaimResponse, PaginatedResponse
 from zndraw_joblib.exceptions import ProblemDetail
 
 
@@ -290,7 +290,9 @@ def test_list_tasks_for_room_empty(client):
     """List tasks for room returns empty list when no tasks exist."""
     response = client.get("/v1/joblib/rooms/my-room/tasks")
     assert response.status_code == 200
-    assert response.json() == []
+    page = PaginatedResponse[TaskResponse].model_validate(response.json())
+    assert page.items == []
+    assert page.total == 0
 
 
 def test_list_tasks_for_room_returns_tasks(client_factory):
@@ -324,10 +326,10 @@ def test_list_tasks_for_room_returns_tasks(client_factory):
 
     response = client1.get("/v1/joblib/rooms/room1/tasks")
     assert response.status_code == 200
-    tasks = response.json()
-    assert len(tasks) == 2
+    page = PaginatedResponse[TaskResponse].model_validate(response.json())
+    assert page.total == 2
 
-    task_ids = {t["id"] for t in tasks}
+    task_ids = {str(t.id) for t in page.items}
     assert task1.json()["id"] in task_ids
     assert task2.json()["id"] in task_ids
     assert task3.json()["id"] not in task_ids
@@ -353,9 +355,9 @@ def test_list_tasks_for_room_with_status_filter(seeded_client):
     # Filter for pending only
     response = seeded_client.get("/v1/joblib/rooms/room_1/tasks?status=pending")
     assert response.status_code == 200
-    tasks = response.json()
-    assert len(tasks) == 1
-    assert tasks[0]["status"] == "pending"
+    page = PaginatedResponse[TaskResponse].model_validate(response.json())
+    assert len(page.items) == 1
+    assert page.items[0].status.value == "pending"
 
 
 def test_list_tasks_for_room_includes_queue_position(seeded_client):
@@ -376,12 +378,12 @@ def test_list_tasks_for_room_includes_queue_position(seeded_client):
 
     response = seeded_client.get("/v1/joblib/rooms/room_1/tasks")
     assert response.status_code == 200
-    tasks = response.json()
+    page = PaginatedResponse[TaskResponse].model_validate(response.json())
 
-    task_map = {t["id"]: t for t in tasks}
-    assert task_map[task1.json()["id"]]["queue_position"] == 1
-    assert task_map[task2.json()["id"]]["queue_position"] == 2
-    assert task_map[task3.json()["id"]]["queue_position"] == 3
+    task_map = {str(t.id): t for t in page.items}
+    assert task_map[task1.json()["id"]].queue_position == 1
+    assert task_map[task2.json()["id"]].queue_position == 2
+    assert task_map[task3.json()["id"]].queue_position == 3
 
 
 def test_list_tasks_for_job_empty(seeded_client):
@@ -390,7 +392,9 @@ def test_list_tasks_for_job_empty(seeded_client):
         "/v1/joblib/rooms/@global/jobs/@global:modifiers:Rotate/tasks"
     )
     assert response.status_code == 200
-    assert response.json() == []
+    page = PaginatedResponse[TaskResponse].model_validate(response.json())
+    assert page.items == []
+    assert page.total == 0
 
 
 def test_list_tasks_for_job_filters_by_job(client_factory):
@@ -419,9 +423,9 @@ def test_list_tasks_for_job_filters_by_job(client_factory):
 
     response = client.get("/v1/joblib/rooms/room1/jobs/room1:modifiers:job1/tasks")
     assert response.status_code == 200
-    tasks = response.json()
-    assert len(tasks) == 1
-    assert tasks[0]["id"] == task1.json()["id"]
+    page = PaginatedResponse[TaskResponse].model_validate(response.json())
+    assert len(page.items) == 1
+    assert str(page.items[0].id) == task1.json()["id"]
 
 
 def test_list_tasks_for_job_not_found(client):
@@ -446,9 +450,9 @@ def test_list_tasks_for_global_job_from_room(seeded_client):
         "/v1/joblib/rooms/room_1/jobs/@global:modifiers:Rotate/tasks"
     )
     assert response.status_code == 200
-    tasks = response.json()
-    assert len(tasks) == 1
-    assert tasks[0]["id"] == task1.json()["id"]
+    page = PaginatedResponse[TaskResponse].model_validate(response.json())
+    assert len(page.items) == 1
+    assert str(page.items[0].id) == task1.json()["id"]
 
 
 def test_get_task_includes_queue_position(seeded_client):
