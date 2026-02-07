@@ -46,10 +46,30 @@ def test_all_exports_in_dunder_all():
         "ClaimedTask",
         "Extension",
         "Category",
+        "InternalJobNotConfigured",
+        "register_internal_jobs",
+        "register_internal_tasks",
+        "InternalExecutor",
+        "InternalRegistry",
         "run_sweeper",
         "cleanup_stale_workers",
+        "cleanup_stuck_internal_tasks",
     ]
 
     for name in expected:
         assert name in zndraw_joblib.__all__, f"{name} not in __all__"
         assert hasattr(zndraw_joblib, name), f"{name} not accessible"
+
+
+def test_internal_registry_exports():
+    from zndraw_joblib import (
+        register_internal_jobs,
+        register_internal_tasks,
+        InternalExecutor,
+        InternalRegistry,
+        InternalJobNotConfigured,
+        cleanup_stuck_internal_tasks,
+    )
+    assert callable(register_internal_jobs)
+    assert callable(register_internal_tasks)
+    assert callable(cleanup_stuck_internal_tasks)

@@ -15,11 +15,18 @@ from zndraw_joblib.exceptions import (
     InvalidTaskTransition,
     InvalidRoomId,
     Forbidden,
+    InternalJobNotConfigured,
 )
 from zndraw_joblib.schemas import PaginatedResponse
 from zndraw_joblib.settings import JobLibSettings
 from zndraw_joblib.client import JobManager, ClaimedTask, Extension, Category
-from zndraw_joblib.sweeper import run_sweeper, cleanup_stale_workers
+from zndraw_joblib.registry import (
+    register_internal_jobs,
+    register_internal_tasks,
+    InternalExecutor,
+    InternalRegistry,
+)
+from zndraw_joblib.sweeper import run_sweeper, cleanup_stale_workers, cleanup_stuck_internal_tasks
 
 __all__ = [
     # Router
@@ -43,6 +50,7 @@ __all__ = [
     "InvalidTaskTransition",
     "InvalidRoomId",
     "Forbidden",
+    "InternalJobNotConfigured",
     # Schemas
     "PaginatedResponse",
     # Settings
@@ -52,7 +60,13 @@ __all__ = [
     "ClaimedTask",
     "Extension",
     "Category",
+    # Internal registry
+    "register_internal_jobs",
+    "register_internal_tasks",
+    "InternalExecutor",
+    "InternalRegistry",
     # Sweeper
     "run_sweeper",
     "cleanup_stale_workers",
+    "cleanup_stuck_internal_tasks",
 ]
