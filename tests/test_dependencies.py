@@ -13,3 +13,8 @@ def test_get_settings_is_cached():
     settings1 = get_settings()
     settings2 = get_settings()
     assert settings1 is settings2
+
+
+def test_get_internal_registry_import():
+    from zndraw_joblib.dependencies import get_internal_registry
+    assert callable(get_internal_registry)

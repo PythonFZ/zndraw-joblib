@@ -4,11 +4,12 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Annotated, AsyncGenerator, Callable
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from zndraw_auth import get_async_session
 from zndraw_auth.settings import AuthSettings, get_auth_settings
 
+from zndraw_joblib.registry import InternalRegistry
 from zndraw_joblib.settings import JobLibSettings
 
 # Global lock for serializing database access (SQLite compatibility)
@@ -73,3 +74,8 @@ async def get_locked_async_session(
         # PostgreSQL mode: no locking needed
         async for session in get_async_session(auth_settings):
             yield session
+
+
+async def get_internal_registry(request: Request) -> InternalRegistry | None:
+    """Return the internal registry from app.state, or None if not configured."""
+    return getattr(request.app.state, "internal_registry", None)
