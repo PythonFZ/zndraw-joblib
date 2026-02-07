@@ -234,12 +234,24 @@ def test_resolve_internal_job_from_room(client):
 
 def test_submit_task_for_internal_job_from_room(seeded_client):
     """@internal jobs can be submitted from any room via _resolve_job."""
+    from unittest.mock import AsyncMock, MagicMock
+    from zndraw_joblib.registry import InternalRegistry
+
     # Register an @internal job
     resp = seeded_client.put(
         "/v1/joblib/rooms/@internal/jobs",
         json={"category": "modifiers", "name": "InternalRotate", "schema": {}},
     )
     assert resp.status_code in (200, 201)
+
+    # Set up mock internal registry so @internal dispatch succeeds
+    mock_task_handle = MagicMock()
+    mock_task_handle.kiq = AsyncMock()
+    registry = InternalRegistry(
+        tasks={"@internal:modifiers:InternalRotate": mock_task_handle},
+        extensions={},
+    )
+    seeded_client.app.state.internal_registry = registry
 
     # Submit a task referencing the @internal job from a regular room
     resp = seeded_client.post(

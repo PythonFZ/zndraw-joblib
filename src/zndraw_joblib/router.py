@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from zndraw_auth import User, current_active_user, current_superuser, get_async_session
 
-from zndraw_joblib.dependencies import get_settings, get_locked_async_session, get_session_factory
+from zndraw_joblib.dependencies import get_settings, get_locked_async_session, get_session_factory, get_internal_registry
+from zndraw_joblib.registry import InternalRegistry
 from zndraw_joblib.exceptions import (
     InvalidCategory,
     InvalidRoomId,
@@ -23,6 +24,7 @@ from zndraw_joblib.exceptions import (
     WorkerNotFound,
     TaskNotFound,
     InvalidTaskTransition,
+    InternalJobNotConfigured,
 )
 from zndraw_joblib.models import Job, Worker, WorkerJobLink, Task, TaskStatus, TERMINAL_STATUSES
 from zndraw_joblib.sweeper import _cleanup_worker, _soft_delete_orphan_job
@@ -48,6 +50,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
 LockedSessionDep = Annotated[AsyncSession, Depends(get_locked_async_session)]
 SettingsDep = Annotated[JobLibSettings, Depends(get_settings)]
 SessionFactoryDep = Annotated[object, Depends(get_session_factory)]
+InternalRegistryDep = Annotated[InternalRegistry | None, Depends(get_internal_registry)]
 
 # Valid status transitions
 VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
@@ -527,6 +530,7 @@ async def submit_task(
     response: Response,
     session: LockedSessionDep,
     user: CurrentUserDep,
+    internal_registry: InternalRegistryDep,
 ):
     """Submit a task for processing."""
     validate_room_id(room_id)
@@ -544,6 +548,19 @@ async def submit_task(
     session.add(task)
     await session.commit()
     await session.refresh(task)
+
+    # Dispatch to taskiq for @internal jobs
+    if job.room_id == "@internal":
+        if internal_registry is None or job.full_name not in internal_registry.tasks:
+            raise InternalJobNotConfigured.exception(
+                detail=f"Internal job '{job.full_name}' is registered but no executor is available"
+            )
+        await internal_registry.tasks[job.full_name].kiq(
+            task_id=str(task.id),
+            room_id=room_id,
+            payload=request.payload,
+            base_url="",
+        )
 
     # Set Location header
     response.headers["Location"] = f"/v1/joblib/tasks/{task.id}"
