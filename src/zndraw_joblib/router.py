@@ -96,7 +96,13 @@ async def _resolve_job(
     if len(parts) != 3:
         raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
     job_room_id, category, name = parts
-    if room_id != "@global" and job_room_id not in ("@global", room_id):
+
+    # For non-special rooms, the job must be in the room, @global, or @internal
+    if room_id not in ("@global", "@internal") and job_room_id not in (
+        "@global",
+        "@internal",
+        room_id,
+    ):
         raise JobNotFound.exception(
             detail=f"Job '{job_name}' not accessible from room '{room_id}'"
         )
@@ -166,8 +172,8 @@ router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
 
 
 def validate_room_id(room_id: str) -> None:
-    """Validate room_id doesn't contain @ or : (except @global)."""
-    if room_id == "@global":
+    """Validate room_id doesn't contain @ or : (except @global and @internal)."""
+    if room_id in ("@global", "@internal"):
         return
     if "@" in room_id or ":" in room_id:
         raise InvalidRoomId.exception(
@@ -211,9 +217,9 @@ async def register_job(
     # Validate room_id
     validate_room_id(room_id)
 
-    # Check admin for @global
-    if room_id == "@global" and not user.is_superuser:
-        raise Forbidden.exception(detail="Admin required for @global job registration")
+    # Check admin for @global and @internal
+    if room_id in ("@global", "@internal") and not user.is_superuser:
+        raise Forbidden.exception(detail="Admin required for @global/@internal job registration")
 
     # Validate category
     if request.category not in settings.allowed_categories:
@@ -322,7 +328,8 @@ async def list_jobs(
 
     base_filter = (
         Job.room_id == "@global" if room_id == "@global"
-        else (Job.room_id == "@global") | (Job.room_id == room_id)
+        else Job.room_id == "@internal" if room_id == "@internal"
+        else (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
     )
     base_query = select(Job).where(base_filter, Job.deleted.is_(False))
 
@@ -361,10 +368,11 @@ async def list_workers_for_room(
     """List workers serving jobs in a room. Includes @global workers unless room_id is @global."""
     validate_room_id(room_id)
 
-    # Find jobs for this room (and @global if not requesting @global specifically)
+    # Find jobs for this room (and @global/@internal if not requesting a special room)
     base_filter = (
         Job.room_id == "@global" if room_id == "@global"
-        else (Job.room_id == "@global") | (Job.room_id == room_id)
+        else Job.room_id == "@internal" if room_id == "@internal"
+        else (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
     )
     result = await session.execute(
         select(Job.id).where(base_filter, Job.deleted.is_(False))

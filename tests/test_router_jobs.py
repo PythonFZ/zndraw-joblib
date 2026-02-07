@@ -214,3 +214,46 @@ def test_register_job_private_room_allowed_for_non_superuser(client_factory):
         json={"category": "modifiers", "name": "Rotate", "schema": {}},
     )
     assert response.status_code == 201
+
+
+def test_resolve_internal_job_from_room(client):
+    """@internal jobs are accessible from any room."""
+    # Register an @internal job
+    resp = client.put(
+        "/v1/joblib/rooms/@internal/jobs",
+        json={"category": "modifiers", "name": "Rotate", "schema": {}},
+    )
+    assert resp.status_code in (200, 201)
+
+    # Should be accessible when listing jobs for any room
+    resp = client.get("/v1/joblib/rooms/test-room/jobs")
+    assert resp.status_code == 200
+    names = [j["full_name"] for j in resp.json()["items"]]
+    assert "@internal:modifiers:Rotate" in names
+
+
+def test_submit_task_for_internal_job_from_room(seeded_client):
+    """@internal jobs can be submitted from any room via _resolve_job."""
+    # Register an @internal job
+    resp = seeded_client.put(
+        "/v1/joblib/rooms/@internal/jobs",
+        json={"category": "modifiers", "name": "InternalRotate", "schema": {}},
+    )
+    assert resp.status_code in (200, 201)
+
+    # Submit a task referencing the @internal job from a regular room
+    resp = seeded_client.post(
+        "/v1/joblib/rooms/test-room/tasks/@internal:modifiers:InternalRotate",
+        json={"payload": {}},
+    )
+    assert resp.status_code == 202
+
+
+def test_register_internal_job_forbidden_for_non_superuser(client_factory):
+    """Non-superuser should be blocked from registering @internal jobs."""
+    client = client_factory("regular-user", is_superuser=False)
+    response = client.put(
+        "/v1/joblib/rooms/@internal/jobs",
+        json={"category": "modifiers", "name": "Rotate", "schema": {}},
+    )
+    assert response.status_code == 403
