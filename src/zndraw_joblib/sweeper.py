@@ -118,23 +118,61 @@ async def cleanup_stale_workers(session: AsyncSession, timeout: timedelta) -> in
     return count
 
 
+async def cleanup_stuck_internal_tasks(
+    session: AsyncSession, timeout: timedelta
+) -> int:
+    """Find and fail @internal tasks stuck in RUNNING beyond timeout.
+
+    Args:
+        session: Async database session
+        timeout: How long a RUNNING internal task can run before being considered stuck
+
+    Returns:
+        Count of tasks failed
+    """
+    cutoff = datetime.now(timezone.utc) - timeout
+    now = datetime.now(timezone.utc)
+
+    result = await session.execute(
+        select(Task)
+        .join(Job)
+        .where(
+            Job.room_id == "@internal",
+            Task.status == TaskStatus.RUNNING,
+            Task.started_at < cutoff,
+        )
+    )
+    stuck_tasks = result.scalars().all()
+
+    count = 0
+    for task in stuck_tasks:
+        task.status = TaskStatus.FAILED
+        task.completed_at = now
+        task.error = "Internal worker timeout"
+        session.add(task)
+        count += 1
+
+    if count > 0:
+        await session.commit()
+        logger.info("Failed %d stuck internal task(s)", count)
+
+    return count
+
+
 async def run_sweeper(
     get_session: Callable[[], AsyncGenerator[AsyncSession, None]],
     settings: JobLibSettings,
 ) -> None:
-    """Background task that runs cleanup periodically.
-
-    Args:
-        get_session: Async generator function that yields database sessions
-        settings: Application settings containing timeout and interval config
-    """
+    """Background task that runs cleanup periodically."""
     timeout = timedelta(seconds=settings.worker_timeout_seconds)
+    internal_timeout = timedelta(seconds=settings.internal_task_timeout_seconds)
     interval = settings.sweeper_interval_seconds
 
     logger.info(
-        "Starting sweeper with interval=%ss, worker_timeout=%ss",
+        "Starting sweeper with interval=%ss, worker_timeout=%ss, internal_task_timeout=%ss",
         interval,
         settings.worker_timeout_seconds,
+        settings.internal_task_timeout_seconds,
     )
 
     while True:
@@ -144,5 +182,10 @@ async def run_sweeper(
                 count = await cleanup_stale_workers(session, timeout)
                 if count > 0:
                     logger.info("Cleaned up %s stale worker(s)", count)
+
+            async for session in get_session():
+                count = await cleanup_stuck_internal_tasks(session, internal_timeout)
+                if count > 0:
+                    logger.info("Failed %s stuck internal task(s)", count)
         except Exception as e:
             logger.exception("Error in sweeper: %s", e)

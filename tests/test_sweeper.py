@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from zndraw_joblib.models import Worker, Job, Task, TaskStatus, WorkerJobLink
-from zndraw_joblib.sweeper import cleanup_stale_workers, _cleanup_worker
+from zndraw_joblib.sweeper import cleanup_stale_workers, _cleanup_worker, cleanup_stuck_internal_tasks
 
 
 
@@ -355,3 +355,83 @@ async def test_cleanup_job_keeps_other_workers(async_session_factory, test_user_
         )
         link = result.scalar_one_or_none()
         assert link is not None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stuck_internal_tasks(async_session_factory):
+    """Stuck @internal tasks in RUNNING are marked FAILED after timeout."""
+    async with async_session_factory() as session:
+        job = Job(room_id="@internal", category="modifiers", name="Rotate", schema_={})
+        session.add(job)
+        await session.flush()
+
+        task = Task(
+            job_id=job.id,
+            room_id="test-room",
+            status=TaskStatus.RUNNING,
+            started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        session.add(task)
+        await session.commit()
+        task_id = task.id
+
+    async with async_session_factory() as session:
+        count = await cleanup_stuck_internal_tasks(
+            session, timeout=timedelta(hours=1)
+        )
+        assert count == 1
+
+    async with async_session_factory() as session:
+        result = await session.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one()
+        assert task.status == TaskStatus.FAILED
+        assert task.error == "Internal worker timeout"
+        assert task.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stuck_internal_tasks_skips_recent(async_session_factory):
+    """Recently started @internal tasks are not cleaned up."""
+    async with async_session_factory() as session:
+        job = Job(room_id="@internal", category="modifiers", name="Scale", schema_={})
+        session.add(job)
+        await session.flush()
+
+        task = Task(
+            job_id=job.id,
+            room_id="test-room",
+            status=TaskStatus.RUNNING,
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+        )
+        session.add(task)
+        await session.commit()
+
+    async with async_session_factory() as session:
+        count = await cleanup_stuck_internal_tasks(
+            session, timeout=timedelta(hours=1)
+        )
+        assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stuck_skips_external_tasks(async_session_factory):
+    """External (@global) RUNNING tasks are NOT cleaned up by this function."""
+    async with async_session_factory() as session:
+        job = Job(room_id="@global", category="modifiers", name="Rotate", schema_={})
+        session.add(job)
+        await session.flush()
+
+        task = Task(
+            job_id=job.id,
+            room_id="test-room",
+            status=TaskStatus.RUNNING,
+            started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        session.add(task)
+        await session.commit()
+
+    async with async_session_factory() as session:
+        count = await cleanup_stuck_internal_tasks(
+            session, timeout=timedelta(hours=1)
+        )
+        assert count == 0
