@@ -146,3 +146,10 @@ class Forbidden(ProblemType):
 
     title: ClassVar[str] = "Forbidden"
     status: ClassVar[int] = 403
+
+
+class InternalJobNotConfigured(ProblemType):
+    """Internal job is registered but no executor is available."""
+
+    title: ClassVar[str] = "Service Unavailable"
+    status: ClassVar[int] = 503
