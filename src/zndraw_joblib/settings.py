@@ -18,3 +18,6 @@ class JobLibSettings(BaseSettings):
     # Set enable_db_lock=False for PostgreSQL deployments
     enable_db_lock: bool = True
     db_lock_timeout_seconds: float = 30.0
+
+    # Internal taskiq worker settings
+    internal_task_timeout_seconds: int = 3600  # 1 hour

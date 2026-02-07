@@ -10,6 +10,7 @@ def test_default_settings():
     assert settings.long_poll_max_wait_seconds == 120
     assert settings.enable_db_lock is True
     assert settings.db_lock_timeout_seconds == 30.0
+    assert settings.internal_task_timeout_seconds == 3600
 
 
 def test_settings_from_env(monkeypatch):
@@ -27,3 +28,10 @@ def test_db_lock_settings_from_env(monkeypatch):
     settings = JobLibSettings()
     assert settings.enable_db_lock is False
     assert settings.db_lock_timeout_seconds == 60.0
+
+
+def test_internal_task_timeout_default():
+    from zndraw_joblib.settings import JobLibSettings
+
+    settings = JobLibSettings()
+    assert settings.internal_task_timeout_seconds == 3600
