@@ -37,7 +37,9 @@ def test_update_task_claimed_to_running(seeded_client):
         json={"payload": {}},
     )
     # Claim task
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     claim_data = TaskClaimResponse.model_validate(claim_resp.json())
     assert claim_data.task is not None
     task_id = str(claim_data.task.id)
@@ -64,7 +66,9 @@ def test_update_task_running_to_completed(seeded_client):
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {}},
     )
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     claim_data = TaskClaimResponse.model_validate(claim_resp.json())
     assert claim_data.task is not None
     task_id = str(claim_data.task.id)
@@ -85,7 +89,9 @@ def test_update_task_running_to_failed(seeded_client):
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {}},
     )
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     claim_data = TaskClaimResponse.model_validate(claim_resp.json())
     task_id = str(claim_data.task.id)
 
@@ -107,7 +113,9 @@ def test_update_task_invalid_transition_claimed_to_completed(seeded_client):
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {}},
     )
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     claim_data = TaskClaimResponse.model_validate(claim_resp.json())
     task_id = str(claim_data.task.id)
 
@@ -126,7 +134,9 @@ def test_update_task_invalid_transition_running_to_pending(seeded_client):
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {}},
     )
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     claim_data = TaskClaimResponse.model_validate(claim_resp.json())
     task_id = str(claim_data.task.id)
 
@@ -146,7 +156,9 @@ def test_update_task_invalid_transition_completed_to_failed(seeded_client):
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {}},
     )
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     claim_data = TaskClaimResponse.model_validate(claim_resp.json())
     task_id = str(claim_data.task.id)
 
@@ -167,7 +179,9 @@ def test_update_task_invalid_transition_completed_to_running(seeded_client):
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {}},
     )
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     claim_data = TaskClaimResponse.model_validate(claim_resp.json())
     task_id = str(claim_data.task.id)
 
@@ -188,7 +202,9 @@ def test_update_task_invalid_transition_failed_to_running(seeded_client):
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {}},
     )
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     claim_data = TaskClaimResponse.model_validate(claim_resp.json())
     task_id = str(claim_data.task.id)
 
@@ -221,9 +237,7 @@ def test_update_task_forbidden_for_non_owner(client_factory):
     )
 
     # Owner claims the task
-    claim_resp = owner.post(
-        "/v1/joblib/tasks/claim", json={"worker_id": worker_id}
-    )
+    claim_resp = owner.post("/v1/joblib/tasks/claim", json={"worker_id": worker_id})
     task_id = claim_resp.json()["task"]["id"]
 
     # Other user (non-superuser) tries to update → forbidden
@@ -272,9 +286,7 @@ def test_update_task_superuser_can_update_any_task(client_factory):
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:AdminTest",
         json={"payload": {}},
     )
-    claim_resp = owner.post(
-        "/v1/joblib/tasks/claim", json={"worker_id": worker_id}
-    )
+    claim_resp = owner.post("/v1/joblib/tasks/claim", json={"worker_id": worker_id})
     task_id = claim_resp.json()["task"]["id"]
 
     # Admin can update the task

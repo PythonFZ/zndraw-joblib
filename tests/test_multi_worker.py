@@ -171,7 +171,11 @@ def test_two_workers_can_complete_tasks(client):
 
     client.put(
         "/v1/joblib/rooms/@global/jobs",
-        json={"category": "modifiers", "name": "CompletionJob", "worker_id": worker1_id},
+        json={
+            "category": "modifiers",
+            "name": "CompletionJob",
+            "worker_id": worker1_id,
+        },
     )
 
     # Create second worker and register same job
@@ -180,7 +184,11 @@ def test_two_workers_can_complete_tasks(client):
 
     client.put(
         "/v1/joblib/rooms/@global/jobs",
-        json={"category": "modifiers", "name": "CompletionJob", "worker_id": worker2_id},
+        json={
+            "category": "modifiers",
+            "name": "CompletionJob",
+            "worker_id": worker2_id,
+        },
     )
 
     # Submit two tasks
@@ -213,7 +221,9 @@ def test_two_workers_can_complete_tasks(client):
         f"/v1/joblib/tasks/{claimed_task_1['id']}",
         json={"status": "completed"},
     )
-    assert complete_resp.status_code == 200, f"Failed: {complete_resp.json()}"  # Should NOT fail with MultipleResultsFound
+    assert complete_resp.status_code == 200, (
+        f"Failed: {complete_resp.json()}"
+    )  # Should NOT fail with MultipleResultsFound
 
     # Worker 2 claims and completes second task
     response2 = client.post(

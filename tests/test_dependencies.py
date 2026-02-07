@@ -17,4 +17,5 @@ def test_get_settings_is_cached():
 
 def test_get_internal_registry_import():
     from zndraw_joblib.dependencies import get_internal_registry
+
     assert callable(get_internal_registry)

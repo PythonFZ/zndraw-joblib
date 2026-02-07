@@ -4,7 +4,13 @@
 import time
 from uuid import UUID
 
-from zndraw_joblib.schemas import JobResponse, TaskResponse, WorkerResponse, WorkerSummary, PaginatedResponse
+from zndraw_joblib.schemas import (
+    JobResponse,
+    TaskResponse,
+    WorkerResponse,
+    WorkerSummary,
+    PaginatedResponse,
+)
 from zndraw_joblib.exceptions import ProblemDetail
 
 
@@ -98,7 +104,9 @@ def test_worker_delete_removes_job_after_task_completes(seeded_client):
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {}},
     )
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     task_id = claim_resp.json()["task"]["id"]
     seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
     seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "completed"})
@@ -176,7 +184,9 @@ def test_worker_delete_fails_running_tasks(seeded_client):
     )
 
     # Claim and start running
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     task_id = claim_resp.json()["task"]["id"]
     seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
 
@@ -204,7 +214,9 @@ def test_worker_delete_soft_deletes_job_but_keeps_task(seeded_client):
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {"test": "data"}},
     )
-    claim_resp = seeded_client.post("/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id})
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
+    )
     task_id = claim_resp.json()["task"]["id"]
     seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
     seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "completed"})

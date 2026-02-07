@@ -65,7 +65,12 @@ def test_claim_task_only_registered_jobs(client_factory):
     worker1_id = resp1.json()["id"]
     client1.put(
         "/v1/joblib/rooms/@global/jobs",
-        json={"category": "modifiers", "name": "Rotate", "schema": {}, "worker_id": worker1_id},
+        json={
+            "category": "modifiers",
+            "name": "Rotate",
+            "schema": {},
+            "worker_id": worker1_id,
+        },
     )
 
     # Worker 2 creates worker (but doesn't register the job)

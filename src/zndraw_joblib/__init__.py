@@ -26,7 +26,11 @@ from zndraw_joblib.registry import (
     InternalExecutor,
     InternalRegistry,
 )
-from zndraw_joblib.sweeper import run_sweeper, cleanup_stale_workers, cleanup_stuck_internal_tasks
+from zndraw_joblib.sweeper import (
+    run_sweeper,
+    cleanup_stale_workers,
+    cleanup_stuck_internal_tasks,
+)
 
 __all__ = [
     # Router

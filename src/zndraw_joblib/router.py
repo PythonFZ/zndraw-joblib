@@ -13,7 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from zndraw_auth import User, current_active_user, current_superuser, get_async_session
 
-from zndraw_joblib.dependencies import get_settings, get_locked_async_session, get_session_factory, get_internal_registry
+from zndraw_joblib.dependencies import (
+    get_settings,
+    get_locked_async_session,
+    get_session_factory,
+    get_internal_registry,
+)
 from zndraw_joblib.registry import InternalRegistry
 from zndraw_joblib.exceptions import (
     InvalidCategory,
@@ -26,7 +31,14 @@ from zndraw_joblib.exceptions import (
     InvalidTaskTransition,
     InternalJobNotConfigured,
 )
-from zndraw_joblib.models import Job, Worker, WorkerJobLink, Task, TaskStatus, TERMINAL_STATUSES
+from zndraw_joblib.models import (
+    Job,
+    Worker,
+    WorkerJobLink,
+    Task,
+    TaskStatus,
+    TERMINAL_STATUSES,
+)
 from zndraw_joblib.sweeper import _cleanup_worker, _soft_delete_orphan_job
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
@@ -63,7 +75,6 @@ VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
 }
 
 
-
 def parse_prefer_wait(prefer_header: str | None) -> int | None:
     """
     Parse RFC 7240 Prefer header for wait directive.
@@ -92,9 +103,7 @@ async def _queue_position(session: AsyncSession, task: Task) -> int | None:
     return result.scalar() + 1
 
 
-async def _resolve_job(
-    session: AsyncSession, job_name: str, room_id: str
-) -> Job:
+async def _resolve_job(session: AsyncSession, job_name: str, room_id: str) -> Job:
     parts = job_name.split(":", 2)
     if len(parts) != 3:
         raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
@@ -222,7 +231,9 @@ async def register_job(
 
     # Check admin for @global and @internal
     if room_id in ("@global", "@internal") and not user.is_superuser:
-        raise Forbidden.exception(detail="Admin required for @global/@internal job registration")
+        raise Forbidden.exception(
+            detail="Admin required for @global/@internal job registration"
+        )
 
     # Validate category
     if request.category not in settings.allowed_categories:
@@ -330,8 +341,10 @@ async def list_jobs(
     validate_room_id(room_id)
 
     base_filter = (
-        Job.room_id == "@global" if room_id == "@global"
-        else Job.room_id == "@internal" if room_id == "@internal"
+        Job.room_id == "@global"
+        if room_id == "@global"
+        else Job.room_id == "@internal"
+        if room_id == "@internal"
         else (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
     )
     base_query = select(Job).where(base_filter, Job.deleted.is_(False))
@@ -344,8 +357,7 @@ async def list_jobs(
 
     # Paginated + eager-load workers
     result = await session.execute(
-        base_query.options(selectinload(Job.workers))
-        .offset(offset).limit(limit)
+        base_query.options(selectinload(Job.workers)).offset(offset).limit(limit)
     )
     jobs = result.scalars().all()
 
@@ -373,8 +385,10 @@ async def list_workers_for_room(
 
     # Find jobs for this room (and @global/@internal if not requesting a special room)
     base_filter = (
-        Job.room_id == "@global" if room_id == "@global"
-        else Job.room_id == "@internal" if room_id == "@internal"
+        Job.room_id == "@global"
+        if room_id == "@global"
+        else Job.room_id == "@internal"
+        if room_id == "@internal"
         else (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
     )
     result = await session.execute(
@@ -403,7 +417,8 @@ async def list_workers_for_room(
         select(Worker)
         .where(Worker.id.in_(worker_id_query))
         .options(selectinload(Worker.jobs))
-        .offset(offset).limit(limit)
+        .offset(offset)
+        .limit(limit)
     )
     workers = result.scalars().all()
 
@@ -443,7 +458,8 @@ async def list_tasks_for_room(
     result = await session.execute(
         base_query.options(selectinload(Task.job))
         .order_by(Task.created_at.asc())
-        .offset(offset).limit(limit)
+        .offset(offset)
+        .limit(limit)
     )
     tasks = result.scalars().all()
 
@@ -482,7 +498,8 @@ async def list_tasks_for_job(
     result = await session.execute(
         base_query.options(selectinload(Task.job))
         .order_by(Task.created_at.asc())
-        .offset(offset).limit(limit)
+        .offset(offset)
+        .limit(limit)
     )
     tasks = result.scalars().all()
 
@@ -578,9 +595,7 @@ async def claim_task(
 ):
     """Claim the oldest pending task for jobs the specified worker is registered for."""
     # Validate that worker_id exists and belongs to the authenticated user
-    result = await session.execute(
-        select(Worker).where(Worker.id == request.worker_id)
-    )
+    result = await session.execute(select(Worker).where(Worker.id == request.worker_id))
     worker = result.scalar_one_or_none()
 
     if not worker:
@@ -609,7 +624,9 @@ async def claim_task(
             # Find oldest pending task for jobs this worker is registered for
             result = await session.execute(
                 select(Task.id)
-                .where(Task.job_id.in_(worker_job_ids), Task.status == TaskStatus.PENDING)
+                .where(
+                    Task.job_id.in_(worker_job_ids), Task.status == TaskStatus.PENDING
+                )
                 .order_by(Task.created_at.asc())
                 .limit(1)
             )
@@ -633,13 +650,13 @@ async def claim_task(
                 break
 
             # Another worker claimed it first - exponential backoff with jitter
-            delay = base_delay * (2 ** attempt) * (0.5 + random.random())
+            delay = base_delay * (2**attempt) * (0.5 + random.random())
             await asyncio.sleep(delay)
 
         except OperationalError:
             # Database locked/timeout - rollback and retry with backoff
             await session.rollback()
-            delay = base_delay * (2 ** attempt) * (0.5 + random.random())
+            delay = base_delay * (2**attempt) * (0.5 + random.random())
             await asyncio.sleep(delay)
 
     if not claimed_task_id:
@@ -761,8 +778,7 @@ async def list_workers(
 
     # Paginated + eager-load jobs
     result = await session.execute(
-        select(Worker).options(selectinload(Worker.jobs))
-        .offset(offset).limit(limit)
+        select(Worker).options(selectinload(Worker.jobs)).offset(offset).limit(limit)
     )
     workers = result.scalars().all()
 

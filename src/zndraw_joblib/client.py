@@ -183,7 +183,9 @@ class JobManager:
             ValueError: If worker_id is not set. Call create_worker() or register a job first.
         """
         if self._worker_id is None:
-            raise ValueError("Worker ID not set. Call create_worker() or register a job first.")
+            raise ValueError(
+                "Worker ID not set. Call create_worker() or register a job first."
+            )
 
         response = self.api.http.post(
             f"{self.api.base_url}/v1/joblib/tasks/claim",

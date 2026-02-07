@@ -70,6 +70,10 @@ def test_internal_registry_exports():
         InternalJobNotConfigured,
         cleanup_stuck_internal_tasks,
     )
+
     assert callable(register_internal_jobs)
     assert callable(register_internal_tasks)
     assert callable(cleanup_stuck_internal_tasks)
+    assert InternalExecutor is not None
+    assert InternalRegistry is not None
+    assert InternalJobNotConfigured is not None

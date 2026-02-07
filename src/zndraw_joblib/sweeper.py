@@ -10,7 +10,14 @@ from typing import Callable, AsyncGenerator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from zndraw_joblib.models import Worker, Task, TaskStatus, Job, WorkerJobLink, TERMINAL_STATUSES
+from zndraw_joblib.models import (
+    Worker,
+    Task,
+    TaskStatus,
+    Job,
+    WorkerJobLink,
+    TERMINAL_STATUSES,
+)
 from zndraw_joblib.settings import JobLibSettings
 
 logger = logging.getLogger(__name__)

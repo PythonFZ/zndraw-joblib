@@ -49,9 +49,7 @@ def test_pagination_offset_skips_items(five_job_client):
 
 def test_pagination_limit_and_offset_combined(five_job_client):
     """limit=2&offset=1 returns items 2-3 of 5."""
-    response = five_job_client.get(
-        "/v1/joblib/rooms/@global/jobs?limit=2&offset=1"
-    )
+    response = five_job_client.get("/v1/joblib/rooms/@global/jobs?limit=2&offset=1")
     page = PaginatedResponse[JobSummary].model_validate(response.json())
     assert page.total == 5
     assert len(page.items) == 2

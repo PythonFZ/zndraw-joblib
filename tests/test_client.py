@@ -10,7 +10,12 @@ from zndraw_joblib.client import (
     Extension,
     Category,
 )
-from zndraw_joblib.schemas import JobSummary, JobResponse, TaskResponse, PaginatedResponse
+from zndraw_joblib.schemas import (
+    JobSummary,
+    JobResponse,
+    TaskResponse,
+    PaginatedResponse,
+)
 
 
 class MockClientApi:

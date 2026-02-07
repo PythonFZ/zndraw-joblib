@@ -8,8 +8,11 @@ import pytest
 from sqlalchemy import select
 
 from zndraw_joblib.models import Worker, Job, Task, TaskStatus, WorkerJobLink
-from zndraw_joblib.sweeper import cleanup_stale_workers, _cleanup_worker, cleanup_stuck_internal_tasks
-
+from zndraw_joblib.sweeper import (
+    cleanup_stale_workers,
+    _cleanup_worker,
+    cleanup_stuck_internal_tasks,
+)
 
 
 @pytest.mark.asyncio
@@ -376,9 +379,7 @@ async def test_cleanup_stuck_internal_tasks(async_session_factory):
         task_id = task.id
 
     async with async_session_factory() as session:
-        count = await cleanup_stuck_internal_tasks(
-            session, timeout=timedelta(hours=1)
-        )
+        count = await cleanup_stuck_internal_tasks(session, timeout=timedelta(hours=1))
         assert count == 1
 
     async with async_session_factory() as session:
@@ -407,9 +408,7 @@ async def test_cleanup_stuck_internal_tasks_skips_recent(async_session_factory):
         await session.commit()
 
     async with async_session_factory() as session:
-        count = await cleanup_stuck_internal_tasks(
-            session, timeout=timedelta(hours=1)
-        )
+        count = await cleanup_stuck_internal_tasks(session, timeout=timedelta(hours=1))
         assert count == 0
 
 
@@ -431,7 +430,5 @@ async def test_cleanup_stuck_skips_external_tasks(async_session_factory):
         await session.commit()
 
     async with async_session_factory() as session:
-        count = await cleanup_stuck_internal_tasks(
-            session, timeout=timedelta(hours=1)
-        )
+        count = await cleanup_stuck_internal_tasks(session, timeout=timedelta(hours=1))
         assert count == 0

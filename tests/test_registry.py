@@ -7,7 +7,11 @@ from sqlalchemy import select
 
 from zndraw_joblib.client import Extension, Category
 from zndraw_joblib.models import Job
-from zndraw_joblib.registry import InternalRegistry, register_internal_jobs, register_internal_tasks
+from zndraw_joblib.registry import (
+    InternalRegistry,
+    register_internal_jobs,
+    register_internal_tasks,
+)
 
 
 class Rotate(Extension):
@@ -100,9 +104,7 @@ async def test_register_internal_jobs_creates_db_rows(async_session_factory):
     )
 
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(Job).where(Job.room_id == "@internal")
-        )
+        result = await session.execute(select(Job).where(Job.room_id == "@internal"))
         jobs = result.scalars().all()
 
     assert len(jobs) == 2
