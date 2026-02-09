@@ -100,7 +100,7 @@ class JobManager:
     def __enter__(self) -> "JobManager":
         return self
 
-    def __exit__(self, *exc_info) -> None:
+    def __exit__(self, *_exc_info) -> None:
         self.disconnect()
 
     def disconnect(self) -> None:

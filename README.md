@@ -332,8 +332,8 @@ All models are frozen Pydantic `BaseModel`s (hashable for set-based deduplicatio
 | `JobsInvalidate` | *(none)* | `room:{room_id}` | Job registered/deleted, worker connected/disconnected |
 | `TaskAvailable` | `job_name`, `room_id`, `task_id` | `jobs:{full_name}` | Task submitted (non-`@internal` only) |
 | `TaskStatusEvent` | `id`, `name`, `room_id`, `status`, timestamps, `worker_id`, `error` | `room:{room_id}` | Any task status transition |
-| `JoinJobRoom` | `job_name` | *(client → server)* | Worker joins a job's notification room after REST registration |
-| `LeaveJobRoom` | `job_name` | *(client → server)* | Worker leaves a job's notification room |
+| `JoinJobRoom` | `job_name`, `worker_id` | *(client → server)* | Worker joins a job's notification room after REST registration |
+| `LeaveJobRoom` | `job_name`, `worker_id` | *(client → server)* | Worker leaves a job's notification room |
 
 Event names are auto-derived as snake_case by zndraw-socketio: `jobs_invalidate`, `task_available`, `task_status_event`, `join_job_room`, `leave_job_room`.
 
@@ -346,7 +346,7 @@ Workers (e.g., the `ZnDraw` client class) register jobs via REST, then join the 
 client.put("/v1/joblib/rooms/@global/jobs", json={...})
 
 # 2. Join the job's socketio room
-await sio.emit(JoinJobRoom(job_name="@global:modifiers:Rotate"))
+await sio.emit(JoinJobRoom(job_name="@global:modifiers:Rotate", worker_id="..."))
 
 # 3. Receive TaskAvailable when tasks are submitted
 @sio.on(TaskAvailable)
@@ -354,17 +354,55 @@ async def on_task_available(sid: str, data: TaskAvailable):
     await worker.claim_and_run(data.job_name)
 ```
 
-The host app registers the room join/leave handlers:
+The host app registers the room join/leave handlers and stores the `worker_id` in the SIO session for disconnect cleanup:
 
 ```python
 @tsio.on(JoinJobRoom)
 async def handle_join(sid: str, data: JoinJobRoom):
     await tsio.enter_room(sid, f"jobs:{data.job_name}")
+    session = await tsio.get_session(sid)
+    session["worker_id"] = data.worker_id
+    await tsio.save_session(sid, session)
 
 @tsio.on(LeaveJobRoom)
 async def handle_leave(sid: str, data: LeaveJobRoom):
     await tsio.leave_room(sid, f"jobs:{data.job_name}")
 ```
+
+### Server-Side Disconnect Cleanup
+
+When a worker's Socket.IO connection drops (crash, network loss), the host app can
+immediately clean up by calling `cleanup_worker` from its existing disconnect handler.
+The `worker_id` stored in the SIO session during `JoinJobRoom` enables the mapping:
+
+```python
+from zndraw_joblib import cleanup_worker, emit
+
+@tsio.on("disconnect")
+async def on_disconnect(sid: str, reason: str):
+    session = await tsio.get_session(sid)
+
+    # ... existing cleanup (presence, locks, etc.) ...
+
+    # Worker cleanup
+    worker_id = session.get("worker_id")
+    if worker_id:
+        async with get_session() as db:
+            worker = await db.get(Worker, UUID(worker_id))
+            if worker:
+                emissions = await cleanup_worker(db, worker)
+                await db.commit()
+                await emit(tsio, emissions)
+```
+
+This provides immediate cleanup (fail stuck tasks, remove job links, soft-delete
+orphan jobs) without waiting for the background sweeper's heartbeat timeout.
+
+| Disconnect Scenario | Handler |
+|---------------------|---------|
+| Network drop / process kill | Server-side SIO disconnect (immediate) |
+| Graceful shutdown (`with manager:`) | Client `disconnect()` emits `LeaveJobRoom` + calls `DELETE /workers` |
+| REST-only workers (no SIO) | Background sweeper heartbeat timeout |
 
 ### Emission Deduplication
 
@@ -555,34 +593,34 @@ class JobManager:
 ```python
 from pydantic import BaseModel
 
-# Extension classes are Pydantic BaseModels
-class Rotate(BaseModel):
-    category: str = "modifiers"  # class attribute for category
-    angle: float = 0.0
-    axis: str = "z"
+# Context manager for automatic cleanup on shutdown
+with JobManager(api, tsio=tsio) as manager:
+    # 1. Register jobs
+    @manager.register  # @global by default
+    class Rotate(Extension):
+        category: ClassVar[Category] = Category.MODIFIER
+        angle: float = 0.0
 
-# 1. Register jobs
-@vis.jobs.register  # @global by default
-class Rotate(BaseModel):
-    angle: float = 0.0
+    @manager.register(room="room_123")
+    class PrivateRotate(Extension):
+        category: ClassVar[Category] = Category.MODIFIER
+        angle: float = 0.0
 
-@vis.jobs.register(room="room_123")
-class PrivateRotate(BaseModel):
-    angle: float = 0.0
+    print(len(manager))  # 2 Jobs Registered
 
-print(len(vis.jobs))  # 2 Jobs Registered
-
-# 2. Consume tasks
-for task in vis.jobs.listen():
-    vis.jobs.heartbeat()  # keep alive during processing
-    task.run(vis)
+    # 2. Consume tasks
+    for task in manager.listen(stop_event=shutdown):
+        manager.heartbeat()  # keep alive during processing
+        task.extension.run()
+# disconnect() called automatically: LeaveJobRoom emitted, DELETE /workers called
 ```
 
 ### Notes
 
-- Extension classes are **Pydantic BaseModels**
+- Extension classes are **Pydantic BaseModels** with a `category` ClassVar and `run()` method
 - Schema is generated via `cls.model_json_schema()`
 - Re-registering validates schema match (raises on mismatch)
 - `room=None` (default) registers to `@global`
 - Worker must call `heartbeat()` explicitly during long-running tasks
-- Same identity can both submit tasks and process them (unified `get_current_identity`)
+- Use `with JobManager(...) as manager:` for automatic cleanup on shutdown
+- Or call `manager.disconnect()` explicitly for manual cleanup
