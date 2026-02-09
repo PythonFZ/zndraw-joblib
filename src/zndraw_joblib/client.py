@@ -6,7 +6,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import ClassVar, Generic, Iterator, Protocol, TypeVar
+from typing import Any, ClassVar, Generic, Iterator, Protocol, TypeVar
 from uuid import UUID
 
 import httpx
@@ -43,7 +43,7 @@ class Extension(BaseModel, ABC):
     category: ClassVar[Category]
 
     @abstractmethod
-    def run(self) -> None:
+    def run(self, vis: Any, **kwargs: Any) -> Any:
         """Execute the extension logic. Must be overridden in subclasses."""
 
 
