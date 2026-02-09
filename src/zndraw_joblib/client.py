@@ -9,7 +9,9 @@ from uuid import UUID
 
 import httpx
 from pydantic import BaseModel
+from zndraw_socketio import SyncClientWrapper
 
+from zndraw_joblib.events import JoinJobRoom
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
     TaskSubmitRequest,
@@ -74,8 +76,11 @@ class ClaimedTask(Generic[E]):
 class JobManager:
     """Main entry point for workers. Registers jobs and claims tasks."""
 
-    def __init__(self, api: ApiManager):
+    def __init__(
+        self, api: ApiManager, tsio: SyncClientWrapper | None = None
+    ):
         self.api = api
+        self.tsio = tsio
         self._registry: dict[str, type[Extension]] = {}
         self._worker_id: UUID | None = None
 
@@ -172,6 +177,9 @@ class JobManager:
         if resp.status_code == 200:
             logger.info("Already registered: %s", full_name)
         self._registry[full_name] = cls
+
+        if self.tsio is not None:
+            self.tsio.emit(JoinJobRoom(job_name=full_name))
 
     def claim(self) -> ClaimedTask | None:
         """

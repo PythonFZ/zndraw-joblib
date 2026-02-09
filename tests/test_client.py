@@ -2,6 +2,7 @@
 """Integration tests for the client SDK against the actual server."""
 
 from typing import ClassVar
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,6 +11,7 @@ from zndraw_joblib.client import (
     Extension,
     Category,
 )
+from zndraw_joblib.events import JoinJobRoom
 from zndraw_joblib.schemas import (
     JobSummary,
     JobResponse,
@@ -409,3 +411,67 @@ def test_job_manager_heartbeat_raises_without_worker_id(client):
     manager = JobManager(api)
     with pytest.raises(ValueError, match="Worker ID not set"):
         manager.heartbeat()
+
+
+def test_job_manager_register_emits_join_job_room(client):
+    """register() should emit JoinJobRoom when tsio is provided."""
+    mock_tsio = MagicMock()
+    api = MockClientApi(client)
+    manager = JobManager(api, tsio=mock_tsio)
+
+    @manager.register
+    class Rotate(Extension):
+        category: ClassVar[Category] = Category.MODIFIER
+        angle: float = 0.0
+
+    mock_tsio.emit.assert_called_once()
+    event = mock_tsio.emit.call_args[0][0]
+    assert isinstance(event, JoinJobRoom)
+    assert event.job_name == "@global:modifiers:Rotate"
+
+
+def test_job_manager_register_emits_join_for_each_job(client):
+    """register() should emit JoinJobRoom for each registered job."""
+    mock_tsio = MagicMock()
+    api = MockClientApi(client)
+    manager = JobManager(api, tsio=mock_tsio)
+
+    @manager.register
+    class Job1(Extension):
+        category: ClassVar[Category] = Category.MODIFIER
+
+    @manager.register
+    class Job2(Extension):
+        category: ClassVar[Category] = Category.SELECTION
+
+    assert mock_tsio.emit.call_count == 2
+    events = [call[0][0] for call in mock_tsio.emit.call_args_list]
+    assert events[0] == JoinJobRoom(job_name="@global:modifiers:Job1")
+    assert events[1] == JoinJobRoom(job_name="@global:selections:Job2")
+
+
+def test_job_manager_register_no_tsio_no_emit(client):
+    """register() should not break when tsio is None (default)."""
+    api = MockClientApi(client)
+    manager = JobManager(api)
+
+    @manager.register
+    class NoTsioJob(Extension):
+        category: ClassVar[Category] = Category.MODIFIER
+
+    assert "@global:modifiers:NoTsioJob" in manager
+
+
+def test_job_manager_register_room_emits_correct_job_name(client):
+    """register(room=...) should emit JoinJobRoom with room-scoped job name."""
+    mock_tsio = MagicMock()
+    api = MockClientApi(client)
+    manager = JobManager(api, tsio=mock_tsio)
+
+    @manager.register(room="my_room")
+    class PrivateJob(Extension):
+        category: ClassVar[Category] = Category.MODIFIER
+
+    event = mock_tsio.emit.call_args[0][0]
+    assert isinstance(event, JoinJobRoom)
+    assert event.job_name == "my_room:modifiers:PrivateJob"
