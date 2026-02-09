@@ -433,8 +433,12 @@ def test_job_manager_register_emits_join_for_each_job(client):
     assert mock_tsio.emit.call_count == 2
     events = [call[0][0] for call in mock_tsio.emit.call_args_list]
     worker_id = str(manager.worker_id)
-    assert events[0] == JoinJobRoom(job_name="@global:modifiers:Job1", worker_id=worker_id)
-    assert events[1] == JoinJobRoom(job_name="@global:selections:Job2", worker_id=worker_id)
+    assert events[0] == JoinJobRoom(
+        job_name="@global:modifiers:Job1", worker_id=worker_id
+    )
+    assert events[1] == JoinJobRoom(
+        job_name="@global:selections:Job2", worker_id=worker_id
+    )
 
 
 def test_job_manager_register_no_tsio_no_emit(client):
@@ -543,6 +547,7 @@ def test_job_manager_context_manager(client):
     api = MockClientApi(client)
 
     with JobManager(api, tsio=mock_tsio) as manager:
+
         @manager.register
         class CtxJob(ConcreteExtension):
             category: ClassVar[Category] = Category.MODIFIER

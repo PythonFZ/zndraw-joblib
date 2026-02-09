@@ -113,9 +113,7 @@ class JobManager:
         if self.tsio is not None and self._worker_id is not None:
             for job_name in self._registry:
                 self.tsio.emit(
-                    LeaveJobRoom(
-                        job_name=job_name, worker_id=str(self._worker_id)
-                    )
+                    LeaveJobRoom(job_name=job_name, worker_id=str(self._worker_id))
                 )
 
         if self._worker_id is not None:
@@ -212,9 +210,7 @@ class JobManager:
 
         if self.tsio is not None:
             self.tsio.emit(
-                JoinJobRoom(
-                    job_name=full_name, worker_id=str(self._worker_id)
-                )
+                JoinJobRoom(job_name=full_name, worker_id=str(self._worker_id))
             )
 
     def claim(self) -> ClaimedTask | None:
