@@ -8,78 +8,61 @@ A self-contained FastAPI package for distributed job/task management with SQL pe
 # main.py
 import asyncio
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
+from zndraw_auth import current_active_user, current_superuser
 from zndraw_joblib.router import router
-from zndraw_joblib.dependencies import (
-    get_db_session, get_current_identity, get_is_admin
-)
+from zndraw_joblib.dependencies import get_async_session_maker
 from zndraw_joblib.exceptions import ProblemException, problem_exception_handler
-from zndraw_joblib.sweeper import run_cleanup_sweeper
+from zndraw_joblib.sweeper import run_sweeper
+from zndraw_joblib.settings import JobLibSettings
 
-# 1. Your actual infrastructure
-async def my_real_db_session():
-    async with async_session_maker() as session:
-        yield session
-
-async def my_get_current_identity(token: str = Depends(oauth2_scheme)) -> str:
-    payload = decode_jwt(token)
-    return str(payload["sub"])
-
-async def my_get_is_admin(token: str = Depends(oauth2_scheme)) -> bool:
-    payload = decode_jwt(token)
-    return payload.get("is_admin", False)
+# 1. Your database engine + session maker
+engine = create_async_engine("sqlite+aiosqlite:///./app.db")
+my_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 app = FastAPI()
 
-# 2. Inject your infra into the package
-app.dependency_overrides[get_db_session] = my_real_db_session
-app.dependency_overrides[get_current_identity] = my_get_current_identity
-app.dependency_overrides[get_is_admin] = my_get_is_admin
+# 2. Override the single session maker dependency
+#    This drives ALL database access (locked sessions, session factory, long-polling)
+app.dependency_overrides[get_async_session_maker] = lambda: my_session_maker
 
-# 3. Register exception handler and router
+# 3. Override auth dependencies (from zndraw_auth)
+# app.dependency_overrides[current_active_user] = my_get_current_user
+# app.dependency_overrides[current_superuser] = my_get_superuser
+
+# 4. Register exception handler and router
 app.add_exception_handler(ProblemException, problem_exception_handler)
 app.include_router(router)
 
-# 4. Start background sweeper
-@app.on_event("startup")
-async def startup():
-    asyncio.create_task(
-        run_cleanup_sweeper(
-            base_url=settings.internal_api_url,
-            interval_seconds=30,
-        )
-    )
+# 5. Initialize db lock and start background sweeper
+app.state.db_lock = asyncio.Lock()
+
+async def get_session():
+    async with my_session_maker() as session:
+        yield session
+
+settings = JobLibSettings()
+# asyncio.create_task(run_sweeper(get_session=get_session, settings=settings))
 ```
 
-Also import the SQLModels in your `models.py`:
+### Dependency Architecture
 
-```python
-from zndraw_joblib.models import Job, Worker, Task, WorkerJobLink
-```
-
-## Authentication Dependencies
-
-The package uses **dependency injection passthrough** for authentication:
-
-| Dependency | Returns | Used For |
-|------------|---------|----------|
-| `get_current_identity` | `str` | Identifies user/worker for `Task.created_by_id` and `Worker.id` |
-| `get_is_admin` | `bool` | Controls access to `@global` job registration |
-
-## Host App Requirements
-
-The host app must provide the following endpoint for the client SDK:
+All database access flows through a single `get_async_session_maker` dependency:
 
 ```
-GET /v1/me
+get_async_session_maker  ← override this one dependency
+  ├─ get_locked_async_session  (adds optional SQLite lock, used by write endpoints)
+  └─ get_session_factory       (creates short-lived sessions for long-polling)
 ```
 
-Returns the current authenticated user/worker identity:
-
-```json
-{
-  "id": "user_123"
-}
-```
+| Dependency | Override? | Purpose |
+|------------|-----------|---------|
+| `get_async_session_maker` | **Yes** | Single source of truth for all DB sessions |
+| `current_active_user` | Yes (from zndraw_auth) | Authenticated user identity |
+| `current_superuser` | Yes (from zndraw_auth) | Superuser access control |
+| `get_tsio` | Optional | Socket.IO server for real-time events |
+| `get_settings` | Optional | Override `JobLibSettings` defaults |
 
 ## Configuration
 

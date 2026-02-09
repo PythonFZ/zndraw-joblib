@@ -12,7 +12,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from zndraw_auth import User, current_active_user, current_superuser, get_async_session
+from zndraw_auth import User, current_active_user, current_superuser
 
 from zndraw_joblib.dependencies import (
     get_settings,
@@ -71,7 +71,6 @@ logger = logging.getLogger(__name__)
 # Type aliases for dependency injection
 CurrentUserDep = Annotated[User, Depends(current_active_user)]
 SuperUserDep = Annotated[User, Depends(current_superuser)]
-SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
 LockedSessionDep = Annotated[AsyncSession, Depends(get_locked_async_session)]
 SettingsDep = Annotated[JobLibSettings, Depends(get_settings)]
 SessionFactoryDep = Annotated[object, Depends(get_session_factory)]
@@ -378,7 +377,7 @@ async def register_job(
 @router.get("/rooms/{room_id}/jobs", response_model=PaginatedResponse[JobSummary])
 async def list_jobs(
     room_id: str,
-    session: SessionDep,
+    session: LockedSessionDep,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -414,7 +413,7 @@ async def list_jobs(
 @router.get("/rooms/{room_id}/workers", response_model=PaginatedResponse[WorkerSummary])
 async def list_workers_for_room(
     room_id: str,
-    session: SessionDep,
+    session: LockedSessionDep,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -466,7 +465,7 @@ async def list_workers_for_room(
 @router.get("/rooms/{room_id}/tasks", response_model=PaginatedResponse[TaskResponse])
 async def list_tasks_for_room(
     room_id: str,
-    session: SessionDep,
+    session: LockedSessionDep,
     task_status: TaskStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -504,7 +503,7 @@ async def list_tasks_for_room(
 async def list_tasks_for_job(
     room_id: str,
     job_name: str,
-    session: SessionDep,
+    session: LockedSessionDep,
     task_status: TaskStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -541,7 +540,7 @@ async def list_tasks_for_job(
 async def get_job(
     room_id: str,
     job_name: str,
-    session: SessionDep,
+    session: LockedSessionDep,
 ):
     """Get job details by full name."""
     validate_room_id(room_id)
@@ -846,7 +845,7 @@ async def update_task_status(
 
 @router.get("/workers", response_model=PaginatedResponse[WorkerSummary])
 async def list_workers(
-    session: SessionDep,
+    session: LockedSessionDep,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):

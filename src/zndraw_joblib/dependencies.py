@@ -4,8 +4,8 @@ from contextlib import asynccontextmanager
 from typing import Annotated, AsyncGenerator, Callable
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from zndraw_auth import get_async_session
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from zndraw_auth.db import get_session_maker
 from zndraw_auth.settings import AuthSettings, get_auth_settings
 
 from zndraw_socketio import AsyncServerWrapper
@@ -30,8 +30,21 @@ async def get_db_lock(request: Request) -> asyncio.Lock:
     return request.app.state.db_lock
 
 
-async def get_session_factory(
+def get_async_session_maker(
     auth_settings: Annotated[AuthSettings, Depends(get_auth_settings)],
+) -> async_sessionmaker[AsyncSession]:
+    """Return the async session maker for the configured database.
+
+    Override this single dependency to redirect all joblib database access
+    to a different engine (e.g., test in-memory SQLite).
+    """
+    return get_session_maker(auth_settings.database_url)
+
+
+async def get_session_factory(
+    session_maker: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_async_session_maker)
+    ],
 ) -> Callable:
     """Returns a factory that creates short-lived async sessions on demand.
 
@@ -41,14 +54,16 @@ async def get_session_factory(
 
     @asynccontextmanager
     async def create_session():
-        async for session in get_async_session(auth_settings):
+        async with session_maker() as session:
             yield session
 
     return create_session
 
 
 async def get_locked_async_session(
-    auth_settings: Annotated[AuthSettings, Depends(get_auth_settings)],
+    session_maker: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_async_session_maker)
+    ],
     joblib_settings: Annotated[JobLibSettings, Depends(get_settings)],
     db_lock: Annotated[asyncio.Lock, Depends(get_db_lock)],
 ) -> AsyncGenerator[AsyncSession, None]:
@@ -75,13 +90,12 @@ async def get_locked_async_session(
                 detail="Database busy, please try again later",
             )
         try:
-            async for session in get_async_session(auth_settings):
+            async with session_maker() as session:
                 yield session
         finally:
             db_lock.release()
     else:
-        # PostgreSQL mode: no locking needed
-        async for session in get_async_session(auth_settings):
+        async with session_maker() as session:
             yield session
 
 

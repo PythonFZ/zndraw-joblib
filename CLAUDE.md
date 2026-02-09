@@ -27,14 +27,14 @@ Tests use `pytest-asyncio` with `asyncio_mode = "auto"` — all async test funct
 - **models.py** — SQLAlchemy 2.0 ORM models (`Job`, `Worker`, `Task`, `WorkerJobLink`) inheriting from `zndraw_auth.Base`.
 - **schemas.py** — Pydantic request/response models including `PaginatedResponse[T]` generic envelope.
 - **client.py** — Synchronous client SDK (`JobManager`, `Extension`, `ClaimedTask`) using `httpx`. Workers use `Extension` subclasses with a `category` ClassVar and `run()` method.
-- **dependencies.py** — FastAPI dependency stubs (`get_locked_async_session`, `get_session_factory`) that host apps override.
+- **dependencies.py** — FastAPI dependencies. `get_async_session_maker` is the single override point for all DB access; `get_locked_async_session` and `get_session_factory` derive from it via DI.
 - **settings.py** — `JobLibSettings` using pydantic-settings with `ZNDRAW_JOBLIB_` env prefix.
 - **exceptions.py** — RFC 9457 Problem Details error types (`JobNotFound`, `SchemaConflict`, `InvalidTaskTransition`, etc.).
 - **sweeper.py** — Background coroutine that cleans up stale workers and orphan jobs.
 
 ### Key Design Decisions
 
-**Dependency injection passthrough**: The package does NOT own database sessions or auth. Host apps override `get_locked_async_session`, `get_session_factory`, `current_active_user`, and `current_superuser` from `zndraw_auth`.
+**Dependency injection passthrough**: The package does NOT own database sessions or auth. Host apps override `get_async_session_maker` (single point for all DB access), plus `current_active_user` and `current_superuser` from `zndraw_auth`. Both `get_locked_async_session` and `get_session_factory` derive from `get_async_session_maker` via DI.
 
 **Job naming**: `{room_id}:{category}:{name}` — `@global` for cross-room jobs, otherwise room-scoped. Room IDs cannot contain `@` or `:`.
 

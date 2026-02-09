@@ -3,7 +3,6 @@
 
 import asyncio
 import uuid
-from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from unittest.mock import MagicMock
 
@@ -75,43 +74,13 @@ def test_db_lock():
 
 @pytest.fixture
 def db_session(async_session_factory):
-    """Return an async session generator for dependency injection."""
+    """Return an async session generator for the sweeper and other non-DI uses."""
 
     async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
         async with async_session_factory() as session:
             yield session
 
     return get_test_session
-
-
-@pytest.fixture
-def locked_db_session(async_session_factory, test_db_lock):
-    """Return a locked async session generator for dependency injection.
-
-    This serializes all database access to prevent SQLite concurrency issues.
-    """
-
-    async def get_locked_test_session() -> AsyncGenerator[AsyncSession, None]:
-        async with test_db_lock:
-            async with async_session_factory() as session:
-                yield session
-
-    return get_locked_test_session
-
-
-@pytest.fixture
-def test_session_factory(async_session_factory):
-    """Return a session factory for dependency injection (used by long-poll)."""
-
-    async def get_test_session_factory():
-        @asynccontextmanager
-        async def create_session():
-            async with async_session_factory() as session:
-                yield session
-
-        return create_session
-
-    return get_test_session_factory
 
 
 @pytest.fixture
@@ -126,27 +95,19 @@ def mock_current_user(test_user):
 
 def _build_app(
     *,
-    db_session,
-    locked_db_session,
-    session_factory,
+    session_maker,
     db_lock,
     current_user,
 ) -> FastAPI:
     """Build a configured FastAPI app with standard dependency overrides."""
-    from zndraw_auth import current_active_user, current_superuser, get_async_session
-    from zndraw_joblib.dependencies import (
-        get_db_lock,
-        get_locked_async_session,
-        get_session_factory,
-    )
+    from zndraw_auth import current_active_user, current_superuser
+    from zndraw_joblib.dependencies import get_async_session_maker, get_db_lock
 
     app = FastAPI()
     app.state.db_lock = db_lock
     app.include_router(router)
     app.add_exception_handler(ProblemException, problem_exception_handler)
-    app.dependency_overrides[get_async_session] = db_session
-    app.dependency_overrides[get_locked_async_session] = locked_db_session
-    app.dependency_overrides[get_session_factory] = session_factory
+    app.dependency_overrides[get_async_session_maker] = lambda: session_maker
     app.dependency_overrides[get_db_lock] = lambda: db_lock
     app.dependency_overrides[current_active_user] = current_user
     app.dependency_overrides[current_superuser] = current_user
@@ -154,14 +115,10 @@ def _build_app(
 
 
 @pytest.fixture
-def app(
-    db_session, locked_db_session, test_session_factory, test_db_lock, mock_current_user
-):
+def app(async_session_factory, test_db_lock, mock_current_user):
     """Create a FastAPI app with dependency overrides."""
     return _build_app(
-        db_session=db_session,
-        locked_db_session=locked_db_session,
-        session_factory=test_session_factory,
+        session_maker=async_session_factory,
         db_lock=test_db_lock,
         current_user=mock_current_user,
     )
@@ -203,27 +160,8 @@ def client_factory(async_session_factory, test_db_lock):
         async def get_current_user():
             return user
 
-        async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
-            async with async_session_factory() as session:
-                yield session
-
-        async def get_locked_test_session() -> AsyncGenerator[AsyncSession, None]:
-            async with test_db_lock:
-                async with async_session_factory() as session:
-                    yield session
-
-        async def get_test_session_factory():
-            @asynccontextmanager
-            async def create_session():
-                async with async_session_factory() as session:
-                    yield session
-
-            return create_session
-
         app = _build_app(
-            db_session=get_test_session,
-            locked_db_session=get_locked_test_session,
-            session_factory=get_test_session_factory,
+            session_maker=async_session_factory,
             db_lock=test_db_lock,
             current_user=get_current_user,
         )
