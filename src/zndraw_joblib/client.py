@@ -13,7 +13,7 @@ import httpx
 from pydantic import BaseModel
 from zndraw_socketio import SyncClientWrapper
 
-from zndraw_joblib.events import JoinJobRoom
+from zndraw_joblib.events import JoinJobRoom, LeaveJobRoom
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
     TaskSubmitRequest,
@@ -96,6 +96,37 @@ class JobManager:
 
     def __iter__(self) -> Iterator[str]:
         return iter(self._registry)
+
+    def __enter__(self) -> "JobManager":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.disconnect()
+
+    def disconnect(self) -> None:
+        """Gracefully disconnect the worker.
+
+        1. Emits LeaveJobRoom for each registered job (socket room cleanup)
+        2. Calls DELETE /workers/{worker_id} (DB cleanup: fail tasks, remove links, soft-delete orphan jobs)
+        3. Clears local registry state
+        """
+        if self.tsio is not None and self._worker_id is not None:
+            for job_name in self._registry:
+                self.tsio.emit(
+                    LeaveJobRoom(
+                        job_name=job_name, worker_id=str(self._worker_id)
+                    )
+                )
+
+        if self._worker_id is not None:
+            resp = self.api.http.delete(
+                f"{self.api.base_url}/v1/joblib/workers/{self._worker_id}",
+                headers=self.api.get_headers(),
+            )
+            resp.raise_for_status()
+
+        self._registry.clear()
+        self._worker_id = None
 
     @property
     def worker_id(self) -> UUID | None:

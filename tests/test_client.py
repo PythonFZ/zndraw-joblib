@@ -11,7 +11,7 @@ from zndraw_joblib.client import (
     Extension,
     Category,
 )
-from zndraw_joblib.events import JoinJobRoom
+from zndraw_joblib.events import JoinJobRoom, LeaveJobRoom
 from zndraw_joblib.schemas import (
     JobSummary,
     JobResponse,
@@ -469,3 +469,91 @@ def test_extension_cannot_be_instantiated_directly():
     """Extension base class cannot be instantiated (ABC)."""
     with pytest.raises(TypeError, match="Can't instantiate abstract class"):
         Extension()
+
+
+def test_job_manager_disconnect_emits_leave_and_deletes_worker(client):
+    """disconnect() should emit LeaveJobRoom for each job and DELETE the worker."""
+    mock_tsio = MagicMock()
+    api = MockClientApi(client)
+    manager = JobManager(api, tsio=mock_tsio)
+
+    @manager.register
+    class Job1(ConcreteExtension):
+        category: ClassVar[Category] = Category.MODIFIER
+
+    @manager.register
+    class Job2(ConcreteExtension):
+        category: ClassVar[Category] = Category.SELECTION
+
+    worker_id = manager.worker_id
+    assert worker_id is not None
+    mock_tsio.reset_mock()
+
+    manager.disconnect()
+
+    # Should have emitted LeaveJobRoom for each job
+    assert mock_tsio.emit.call_count == 2
+    events = [call[0][0] for call in mock_tsio.emit.call_args_list]
+    assert all(isinstance(e, LeaveJobRoom) for e in events)
+    job_names = {e.job_name for e in events}
+    assert job_names == {"@global:modifiers:Job1", "@global:selections:Job2"}
+
+    # Local state should be cleared
+    assert len(manager) == 0
+    assert manager.worker_id is None
+
+    # Worker should be deleted from server
+    resp = client.patch(f"/v1/joblib/workers/{worker_id}")
+    assert resp.status_code == 404
+
+
+def test_job_manager_disconnect_no_tsio(client):
+    """disconnect() should work without tsio (REST-only cleanup)."""
+    api = MockClientApi(client)
+    manager = JobManager(api)
+
+    @manager.register
+    class RestJob(ConcreteExtension):
+        category: ClassVar[Category] = Category.MODIFIER
+
+    worker_id = manager.worker_id
+    assert worker_id is not None
+
+    manager.disconnect()
+
+    assert len(manager) == 0
+    assert manager.worker_id is None
+
+    # Worker should be deleted
+    resp = client.patch(f"/v1/joblib/workers/{worker_id}")
+    assert resp.status_code == 404
+
+
+def test_job_manager_disconnect_no_worker_id():
+    """disconnect() should be safe to call when no worker_id is set."""
+    api = MagicMock()
+    manager = JobManager(api)
+    manager.disconnect()  # Should not raise
+    assert manager.worker_id is None
+
+
+def test_job_manager_context_manager(client):
+    """JobManager should support with-statement for automatic disconnect."""
+    mock_tsio = MagicMock()
+    api = MockClientApi(client)
+
+    with JobManager(api, tsio=mock_tsio) as manager:
+        @manager.register
+        class CtxJob(ConcreteExtension):
+            category: ClassVar[Category] = Category.MODIFIER
+
+        worker_id = manager.worker_id
+        assert worker_id is not None
+
+    # After exiting context, state should be cleared
+    assert manager.worker_id is None
+    assert len(manager) == 0
+
+    # Worker should be deleted from server
+    resp = client.patch(f"/v1/joblib/workers/{worker_id}")
+    assert resp.status_code == 404
