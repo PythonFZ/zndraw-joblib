@@ -310,22 +310,22 @@ def test_job_manager_complete_workflow(client):
     assert isinstance(claimed1.extension, ProcessData)
 
     # 3. Update to running and complete
-    client.patch(f"/v1/joblib/tasks/{claimed1.task_id}", json={"status": "running"})
-    complete_resp = client.patch(
-        f"/v1/joblib/tasks/{claimed1.task_id}",
-        json={"status": "completed"},
-    )
+    manager.start(claimed1)
+    manager.complete(claimed1)
+
+    # 4. Verify completed status
+    complete_resp = client.get(f"/v1/joblib/tasks/{claimed1.task_id}")
     completed = TaskResponse.model_validate(complete_resp.json())
     assert completed.status.value == "completed"
 
-    # 4. Claim second task
+    # 5. Claim second task
     claimed2 = manager.claim()
     assert claimed2 is not None
     assert isinstance(claimed2.extension, ProcessData)
 
-    # 5. Complete second task
-    client.patch(f"/v1/joblib/tasks/{claimed2.task_id}", json={"status": "running"})
-    client.patch(f"/v1/joblib/tasks/{claimed2.task_id}", json={"status": "completed"})
+    # 6. Complete second task
+    manager.start(claimed2)
+    manager.complete(claimed2)
 
     # 6. No more tasks - claim should return None
     assert manager.claim() is None
@@ -539,6 +539,87 @@ def test_job_manager_disconnect_no_worker_id():
     manager = JobManager(api)
     manager.disconnect()  # Should not raise
     assert manager.worker_id is None
+
+
+def _register_claim(client):
+    """Helper: register a job, submit a task, claim it. Returns (manager, claimed)."""
+    api = MockClientApi(client)
+    manager = JobManager(api)
+
+    @manager.register
+    class TaskJob(ConcreteExtension):
+        category: ClassVar[Category] = Category.MODIFIER
+        value: int = 0
+
+    client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:TaskJob",
+        json={"payload": {"value": 7}},
+    )
+    claimed = manager.claim()
+    assert claimed is not None
+    return manager, claimed
+
+
+def test_job_manager_start_transitions_to_running(client):
+    """manager.start(task) should transition task from CLAIMED to RUNNING."""
+    manager, claimed = _register_claim(client)
+
+    manager.start(claimed)
+
+    resp = client.get(f"/v1/joblib/tasks/{claimed.task_id}")
+    task = TaskResponse.model_validate(resp.json())
+    assert task.status.value == "running"
+    assert task.started_at is not None
+
+
+def test_job_manager_complete_transitions_to_completed(client):
+    """manager.complete(task) should transition task from RUNNING to COMPLETED."""
+    manager, claimed = _register_claim(client)
+
+    manager.start(claimed)
+    manager.complete(claimed)
+
+    resp = client.get(f"/v1/joblib/tasks/{claimed.task_id}")
+    task = TaskResponse.model_validate(resp.json())
+    assert task.status.value == "completed"
+    assert task.completed_at is not None
+
+
+def test_job_manager_fail_transitions_to_failed_with_error(client):
+    """manager.fail(task, error) should transition to FAILED and store error."""
+    manager, claimed = _register_claim(client)
+
+    manager.start(claimed)
+    manager.fail(claimed, "something broke")
+
+    resp = client.get(f"/v1/joblib/tasks/{claimed.task_id}")
+    task = TaskResponse.model_validate(resp.json())
+    assert task.status.value == "failed"
+    assert task.error == "something broke"
+    assert task.completed_at is not None
+
+
+def test_job_manager_cancel_from_claimed(client):
+    """manager.cancel(task) should transition from CLAIMED to CANCELLED."""
+    manager, claimed = _register_claim(client)
+
+    manager.cancel(claimed)
+
+    resp = client.get(f"/v1/joblib/tasks/{claimed.task_id}")
+    task = TaskResponse.model_validate(resp.json())
+    assert task.status.value == "cancelled"
+
+
+def test_job_manager_cancel_from_running(client):
+    """manager.cancel(task) should transition from RUNNING to CANCELLED."""
+    manager, claimed = _register_claim(client)
+
+    manager.start(claimed)
+    manager.cancel(claimed)
+
+    resp = client.get(f"/v1/joblib/tasks/{claimed.task_id}")
+    task = TaskResponse.model_validate(resp.json())
+    assert task.status.value == "cancelled"
 
 
 def test_job_manager_context_manager(client):

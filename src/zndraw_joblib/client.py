@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from zndraw_socketio import SyncClientWrapper
 
 from zndraw_joblib.events import JoinJobRoom, LeaveJobRoom
+from zndraw_joblib.models import TaskStatus
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
     TaskSubmitRequest,
@@ -272,6 +273,36 @@ class JobManager:
                 yield claimed
             else:
                 time.sleep(polling_interval)
+
+    def _update_task(
+        self, task_id: str, status: TaskStatus, error: str | None = None
+    ) -> None:
+        """Update a task's status via the server."""
+        body: dict[str, str] = {"status": status.value}
+        if error is not None:
+            body["error"] = error
+        response = self.api.http.patch(
+            f"{self.api.base_url}/v1/joblib/tasks/{task_id}",
+            headers=self.api.get_headers(),
+            json=body,
+        )
+        response.raise_for_status()
+
+    def start(self, task: ClaimedTask) -> None:
+        """Transition a claimed task to RUNNING."""
+        self._update_task(task.task_id, TaskStatus.RUNNING)
+
+    def complete(self, task: ClaimedTask) -> None:
+        """Transition a running task to COMPLETED."""
+        self._update_task(task.task_id, TaskStatus.COMPLETED)
+
+    def fail(self, task: ClaimedTask, error: str) -> None:
+        """Transition a running task to FAILED with an error message."""
+        self._update_task(task.task_id, TaskStatus.FAILED, error)
+
+    def cancel(self, task: ClaimedTask) -> None:
+        """Transition a claimed or running task to CANCELLED."""
+        self._update_task(task.task_id, TaskStatus.CANCELLED)
 
     def heartbeat(self) -> None:
         """Send a heartbeat to keep the worker alive."""
