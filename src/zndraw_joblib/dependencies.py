@@ -79,3 +79,13 @@ async def get_locked_async_session(
 async def get_internal_registry(request: Request) -> InternalRegistry | None:
     """Return the internal registry from app.state, or None if not configured."""
     return getattr(request.app.state, "internal_registry", None)
+
+
+async def get_tsio():
+    """Return the Socket.IO server wrapper for emitting events.
+
+    Override this dependency in the host app to provide a real
+    zndraw-socketio AsyncServerWrapper. Returns None by default,
+    which disables all real-time event emissions.
+    """
+    return None

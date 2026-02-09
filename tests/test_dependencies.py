@@ -19,3 +19,11 @@ def test_get_internal_registry_import():
     from zndraw_joblib.dependencies import get_internal_registry
 
     assert callable(get_internal_registry)
+
+
+async def test_get_tsio_returns_none_by_default():
+    """Default tsio dependency returns None (no socketio configured)."""
+    from zndraw_joblib.dependencies import get_tsio
+
+    result = await get_tsio()
+    assert result is None
