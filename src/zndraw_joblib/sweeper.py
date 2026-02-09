@@ -5,13 +5,20 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncGenerator, Callable
+from typing import AsyncGenerator, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from zndraw_joblib.events import Emission, JobsInvalidate, TaskStatusEvent
+from zndraw_socketio import AsyncServerWrapper
+
+from zndraw_joblib.events import (
+    Emission,
+    JobsInvalidate,
+    build_task_status_emission,
+    emit,
+)
 from zndraw_joblib.models import (
     TERMINAL_STATUSES,
     Job,
@@ -23,24 +30,6 @@ from zndraw_joblib.models import (
 from zndraw_joblib.settings import JobLibSettings
 
 logger = logging.getLogger(__name__)
-
-
-def _task_status_emission(task: Task, job_full_name: str) -> Emission:
-    """Build a TaskStatusEvent emission from a task."""
-    return Emission(
-        TaskStatusEvent(
-            id=str(task.id),
-            name=job_full_name,
-            room_id=task.room_id,
-            status=task.status,
-            created_at=task.created_at,
-            started_at=task.started_at,
-            completed_at=task.completed_at,
-            worker_id=str(task.worker_id) if task.worker_id else None,
-            error=task.error,
-        ),
-        f"room:{task.room_id}",
-    )
 
 
 async def _soft_delete_orphan_job(
@@ -80,7 +69,7 @@ async def _soft_delete_orphan_job(
     return set()
 
 
-async def _cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission]:
+async def cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission]:
     """Clean up a worker by failing tasks, removing links, and soft-deleting orphan jobs.
 
     This is the shared cleanup logic used by both delete_worker endpoint and sweeper.
@@ -105,7 +94,7 @@ async def _cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission
         task.error = "Worker disconnected"
         session.add(task)
         emissions.add(
-            _task_status_emission(task, task.job.full_name if task.job else "")
+            build_task_status_emission(task, task.job.full_name if task.job else "")
         )
 
     # Get job IDs this worker is linked to before deleting links
@@ -152,7 +141,7 @@ async def cleanup_stale_workers(
     count = 0
     for worker in stale_workers:
         logger.info("Cleaning up stale worker: %s", worker.id)
-        emissions = await _cleanup_worker(session, worker)
+        emissions = await cleanup_worker(session, worker)
         all_emissions |= emissions
         count += 1
 
@@ -197,7 +186,7 @@ async def cleanup_stuck_internal_tasks(
         task.error = "Internal worker timeout"
         session.add(task)
         emissions.add(
-            _task_status_emission(task, task.job.full_name if task.job else "")
+            build_task_status_emission(task, task.job.full_name if task.job else "")
         )
         count += 1
 
@@ -211,7 +200,7 @@ async def cleanup_stuck_internal_tasks(
 async def run_sweeper(
     get_session: Callable[[], AsyncGenerator[AsyncSession, None]],
     settings: JobLibSettings,
-    tsio: Any = None,
+    tsio: AsyncServerWrapper | None = None,
 ) -> None:
     """Background task that runs cleanup periodically."""
     timeout = timedelta(seconds=settings.worker_timeout_seconds)
@@ -232,13 +221,7 @@ async def run_sweeper(
                 count, emissions = await cleanup_stale_workers(session, timeout)
                 if count > 0:
                     logger.info("Cleaned up %s stale worker(s)", count)
-                if tsio and emissions:
-                    for em in emissions:
-                        await tsio.emit(
-                            em.event.__class__.__name__,
-                            em.event.model_dump(),
-                            room=em.room,
-                        )
+                await emit(tsio, emissions)
 
             async for session in get_session():
                 count, emissions = await cleanup_stuck_internal_tasks(
@@ -246,12 +229,6 @@ async def run_sweeper(
                 )
                 if count > 0:
                     logger.info("Failed %s stuck internal task(s)", count)
-                if tsio and emissions:
-                    for em in emissions:
-                        await tsio.emit(
-                            em.event.__class__.__name__,
-                            em.event.model_dump(),
-                            room=em.room,
-                        )
+                await emit(tsio, emissions)
         except Exception as e:
             logger.exception("Error in sweeper: %s", e)

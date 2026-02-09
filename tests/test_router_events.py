@@ -4,11 +4,8 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from zndraw_joblib.router import router
-from zndraw_joblib.exceptions import ProblemException, problem_exception_handler
 from zndraw_joblib.dependencies import get_tsio
 from zndraw_joblib.events import JobsInvalidate, TaskAvailable, TaskStatusEvent
 
@@ -22,27 +19,9 @@ def mock_tsio():
 
 
 @pytest.fixture
-def app_with_tsio(
-    db_session,
-    locked_db_session,
-    test_session_factory,
-    mock_current_user,
-    mock_tsio,
-):
+def app_with_tsio(app, mock_tsio):
     """App with tsio dependency overridden."""
-    from zndraw_auth import current_active_user, current_superuser, get_async_session
-    from zndraw_joblib.dependencies import get_locked_async_session, get_session_factory
-
-    app = FastAPI()
-    app.include_router(router)
-    app.add_exception_handler(ProblemException, problem_exception_handler)
-    app.dependency_overrides[get_async_session] = db_session
-    app.dependency_overrides[get_locked_async_session] = locked_db_session
-    app.dependency_overrides[get_session_factory] = test_session_factory
-    app.dependency_overrides[current_active_user] = mock_current_user
-    app.dependency_overrides[current_superuser] = mock_current_user
     app.dependency_overrides[get_tsio] = lambda: mock_tsio
-
     return app
 
 

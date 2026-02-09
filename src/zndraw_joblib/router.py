@@ -1,9 +1,10 @@
 # src/zndraw_joblib/router.py
 import asyncio
 import random
+import logging
 import re
 from datetime import datetime, timezone
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Response, status
@@ -26,7 +27,8 @@ from zndraw_joblib.events import (
     Emission,
     JobsInvalidate,
     TaskAvailable,
-    TaskStatusEvent,
+    build_task_status_emission,
+    emit,
 )
 from zndraw_joblib.registry import InternalRegistry
 from zndraw_joblib.exceptions import (
@@ -48,7 +50,7 @@ from zndraw_joblib.models import (
     TaskStatus,
     TERMINAL_STATUSES,
 )
-from zndraw_joblib.sweeper import _cleanup_worker, _soft_delete_orphan_job
+from zndraw_joblib.sweeper import cleanup_worker, _soft_delete_orphan_job
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
     JobResponse,
@@ -63,6 +65,8 @@ from zndraw_joblib.schemas import (
     PaginatedResponse,
 )
 from zndraw_joblib.settings import JobLibSettings
+
+logger = logging.getLogger(__name__)
 
 # Type aliases for dependency injection
 CurrentUserDep = Annotated[User, Depends(current_active_user)]
@@ -99,18 +103,11 @@ def parse_prefer_wait(prefer_header: str | None) -> int | None:
 
 
 async def _queue_position(session: AsyncSession, task: Task) -> int | None:
+    """Get queue position for a single task via the bulk helper."""
     if task.status != TaskStatus.PENDING:
         return None
-    result = await session.execute(
-        select(func.count())
-        .select_from(Task)
-        .where(
-            Task.job_id == task.job_id,
-            Task.status == TaskStatus.PENDING,
-            Task.created_at < task.created_at,
-        )
-    )
-    return result.scalar() + 1
+    positions = await _bulk_queue_positions(session, [task.id])
+    return positions.get(task.id)
 
 
 async def _resolve_job(session: AsyncSession, job_name: str, room_id: str) -> Job:
@@ -159,6 +156,25 @@ async def _task_response(session: AsyncSession, task: Task) -> TaskResponse:
     )
 
 
+async def _bulk_queue_positions(
+    session: AsyncSession, task_ids: list[UUID]
+) -> dict[UUID, int]:
+    """Compute queue positions for pending tasks in a single query using a window function."""
+    if not task_ids:
+        return {}
+    # Window function: rank each pending task within its job by created_at
+    row_num = (
+        func.row_number()
+        .over(partition_by=Task.job_id, order_by=Task.created_at.asc())
+        .label("pos")
+    )
+    subq = select(Task.id, row_num).where(Task.status == TaskStatus.PENDING).subquery()
+    result = await session.execute(
+        select(subq.c.id, subq.c.pos).where(subq.c.id.in_(task_ids))
+    )
+    return {row.id: row.pos for row in result}
+
+
 async def _bulk_task_responses(
     session: AsyncSession, tasks: list[Task]
 ) -> list[TaskResponse]:
@@ -166,11 +182,8 @@ async def _bulk_task_responses(
 
     Expects tasks to have been loaded with selectinload(Task.job).
     """
-    # Compute queue positions for pending tasks
-    queue_positions: dict[UUID, int] = {}
-    for task in tasks:
-        if task.status == TaskStatus.PENDING:
-            queue_positions[task.id] = await _queue_position(session, task)
+    pending_ids = [t.id for t in tasks if t.status == TaskStatus.PENDING]
+    queue_positions = await _bulk_queue_positions(session, pending_ids)
 
     return [
         TaskResponse(
@@ -191,32 +204,23 @@ async def _bulk_task_responses(
 
 
 async def _task_status_emission(session: AsyncSession, task: Task) -> Emission:
-    """Build a TaskStatusEvent emission from a task."""
+    """Build a TaskStatusEvent emission from a task, querying job name and queue position."""
     result = await session.execute(select(Job).where(Job.id == task.job_id))
     job = result.scalar_one_or_none()
-    return Emission(
-        TaskStatusEvent(
-            id=str(task.id),
-            name=job.full_name if job else "",
-            room_id=task.room_id,
-            status=task.status,
-            created_at=task.created_at,
-            started_at=task.started_at,
-            completed_at=task.completed_at,
-            queue_position=await _queue_position(session, task),
-            worker_id=str(task.worker_id) if task.worker_id else None,
-            error=task.error,
-        ),
-        f"room:{task.room_id}",
+    return build_task_status_emission(
+        task,
+        job_full_name=job.full_name if job else "",
+        queue_position=await _queue_position(session, task),
     )
 
 
-async def _emit(tsio: AsyncServerWrapper | None, emissions: set[Emission]) -> None:
-    """Emit a set of events if tsio is available."""
-    if not tsio:
-        return
-    for emission in emissions:
-        await tsio.emit(emission.event, room=emission.room)
+def _room_job_filter(room_id: str):
+    """Build a SQLAlchemy filter for jobs visible from a given room."""
+    if room_id == "@global":
+        return Job.room_id == "@global"
+    if room_id == "@internal":
+        return Job.room_id == "@internal"
+    return (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
 
 
 router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
@@ -226,7 +230,7 @@ def validate_room_id(room_id: str) -> None:
     """Validate room_id doesn't contain @ or : (except @global and @internal)."""
     if room_id in ("@global", "@internal"):
         return
-    if "@" in room_id or ":" in room_id:
+    if not room_id or "@" in room_id or ":" in room_id:
         raise InvalidRoomId.exception(
             detail=f"Room ID '{room_id}' contains invalid characters (@ or :)"
         )
@@ -349,7 +353,7 @@ async def register_job(
         session.add(link)
 
     await session.commit()
-    await _emit(tsio, {Emission(JobsInvalidate(), f"room:{room_id}")})
+    await emit(tsio, {Emission(JobsInvalidate(), f"room:{room_id}")})
     await session.refresh(job)
 
     # Get worker IDs for this job
@@ -381,14 +385,7 @@ async def list_jobs(
     """List jobs for a room. Includes @global jobs unless room_id is @global."""
     validate_room_id(room_id)
 
-    base_filter = (
-        Job.room_id == "@global"
-        if room_id == "@global"
-        else Job.room_id == "@internal"
-        if room_id == "@internal"
-        else (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
-    )
-    base_query = select(Job).where(base_filter, Job.deleted.is_(False))
+    base_query = select(Job).where(_room_job_filter(room_id), Job.deleted.is_(False))
 
     # Total count
     total_result = await session.execute(
@@ -424,16 +421,8 @@ async def list_workers_for_room(
     """List workers serving jobs in a room. Includes @global workers unless room_id is @global."""
     validate_room_id(room_id)
 
-    # Find jobs for this room (and @global/@internal if not requesting a special room)
-    base_filter = (
-        Job.room_id == "@global"
-        if room_id == "@global"
-        else Job.room_id == "@internal"
-        if room_id == "@internal"
-        else (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
-    )
     result = await session.execute(
-        select(Job.id).where(base_filter, Job.deleted.is_(False))
+        select(Job.id).where(_room_job_filter(room_id), Job.deleted.is_(False))
     )
     job_ids = result.scalars().all()
 
@@ -478,7 +467,7 @@ async def list_workers_for_room(
 async def list_tasks_for_room(
     room_id: str,
     session: SessionDep,
-    status: Optional[TaskStatus] = None,
+    task_status: TaskStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -486,8 +475,8 @@ async def list_tasks_for_room(
     validate_room_id(room_id)
 
     base_query = select(Task).where(Task.room_id == room_id)
-    if status:
-        base_query = base_query.where(Task.status == status)
+    if task_status:
+        base_query = base_query.where(Task.status == task_status)
 
     # Total count
     total_result = await session.execute(
@@ -516,7 +505,7 @@ async def list_tasks_for_job(
     room_id: str,
     job_name: str,
     session: SessionDep,
-    status: Optional[TaskStatus] = None,
+    task_status: TaskStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -526,8 +515,8 @@ async def list_tasks_for_job(
     job = await _resolve_job(session, job_name, room_id)
 
     base_query = select(Task).where(Task.job_id == job.id)
-    if status:
-        base_query = base_query.where(Task.status == status)
+    if task_status:
+        base_query = base_query.where(Task.status == task_status)
 
     # Total count
     total_result = await session.execute(
@@ -596,6 +585,13 @@ async def submit_task(
 
     job = await _resolve_job(session, job_name, room_id)
 
+    # Validate internal registry BEFORE creating the task to avoid orphans
+    if job.room_id == "@internal":
+        if internal_registry is None or job.full_name not in internal_registry.tasks:
+            raise InternalJobNotConfigured.exception(
+                detail=f"Internal job '{job.full_name}' is registered but no executor is available"
+            )
+
     # Create task
     task = Task(
         job_id=job.id,
@@ -608,7 +604,24 @@ async def submit_task(
     await session.commit()
     await session.refresh(task)
 
-    # Emit events
+    # Dispatch to taskiq for @internal jobs (fail task if dispatch fails)
+    if job.room_id == "@internal":
+        try:
+            await internal_registry.tasks[job.full_name].kiq(
+                task_id=str(task.id),
+                room_id=room_id,
+                payload=request.payload,
+                base_url="",
+            )
+        except Exception:
+            task.status = TaskStatus.FAILED
+            task.completed_at = datetime.now(timezone.utc)
+            task.error = "Failed to dispatch to internal executor"
+            await session.commit()
+            await session.refresh(task)
+            return await _task_response(session, task)
+
+    # Emit events (after successful dispatch for @internal)
     emissions: set[Emission] = {await _task_status_emission(session, task)}
     if job.room_id != "@internal":
         emissions.add(
@@ -621,20 +634,7 @@ async def submit_task(
                 f"jobs:{job.full_name}",
             )
         )
-    await _emit(tsio, emissions)
-
-    # Dispatch to taskiq for @internal jobs
-    if job.room_id == "@internal":
-        if internal_registry is None or job.full_name not in internal_registry.tasks:
-            raise InternalJobNotConfigured.exception(
-                detail=f"Internal job '{job.full_name}' is registered but no executor is available"
-            )
-        await internal_registry.tasks[job.full_name].kiq(
-            task_id=str(task.id),
-            room_id=room_id,
-            payload=request.payload,
-            base_url="",
-        )
+    await emit(tsio, emissions)
 
     # Set Location header
     response.headers["Location"] = f"/v1/joblib/tasks/{task.id}"
@@ -713,18 +713,28 @@ async def claim_task(
 
         except OperationalError:
             # Database locked/timeout - rollback and retry with backoff
+            logger.warning(
+                "OperationalError during claim (attempt %d/%d)",
+                attempt + 1,
+                max_attempts,
+            )
             await session.rollback()
             delay = base_delay * (2**attempt) * (0.5 + random.random())
             await asyncio.sleep(delay)
 
     if not claimed_task_id:
+        logger.warning(
+            "Failed to claim task after %d attempts for worker %s",
+            max_attempts,
+            request.worker_id,
+        )
         return TaskClaimResponse(task=None)
 
     # Fetch the claimed task
     result = await session.execute(select(Task).where(Task.id == claimed_task_id))
     task = result.scalar_one()
 
-    await _emit(tsio, {await _task_status_emission(session, task)})
+    await emit(tsio, {await _task_status_emission(session, task)})
 
     return TaskClaimResponse(task=await _task_response(session, task))
 
@@ -751,11 +761,14 @@ async def get_task_status(
     if requested_wait and requested_wait > 0 and task.status not in TERMINAL_STATUSES:
         effective_wait = min(requested_wait, settings.long_poll_max_wait_seconds)
         elapsed = 0.0
-        poll_interval = 1.0  # Check DB every second
+        poll_interval = 1.0
 
         while elapsed < effective_wait and task.status not in TERMINAL_STATUSES:
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
+            poll_interval = min(
+                poll_interval * 1.5, 5.0
+            )  # Exponential backoff, cap at 5s
 
             async with session_factory() as session:
                 result = await session.execute(select(Task).where(Task.id == task_id))
@@ -815,16 +828,18 @@ async def update_task_status(
             task.error = request.error
 
     session.add(task)
+
+    # Handle orphan job cleanup in the same transaction
+    if request.status in TERMINAL_STATUSES:
+        await session.flush()
+        await _soft_delete_orphan_job(session, task.job_id)
+
     await session.commit()
     await session.refresh(task)
 
-    # Build emissions and handle orphan job cleanup
+    # Emit events after commit
     emissions: set[Emission] = {await _task_status_emission(session, task)}
-    if request.status in TERMINAL_STATUSES:
-        orphan_emissions = await _soft_delete_orphan_job(session, task.job_id)
-        emissions |= orphan_emissions
-        await session.commit()
-    await _emit(tsio, emissions)
+    await emit(tsio, emissions)
 
     return await _task_response(session, task)
 
@@ -899,6 +914,6 @@ async def delete_worker(
     if worker.user_id != user.id and not user.is_superuser:
         raise Forbidden.exception(detail="Worker belongs to different user")
 
-    emissions = await _cleanup_worker(session, worker)
+    emissions = await cleanup_worker(session, worker)
     await session.commit()
-    await _emit(tsio, emissions)
+    await emit(tsio, emissions)

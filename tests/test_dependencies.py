@@ -8,11 +8,12 @@ def test_get_settings_returns_settings():
     assert isinstance(settings, JobLibSettings)
 
 
-def test_get_settings_is_cached():
-    """get_settings should return the same instance (cached)."""
+def test_get_settings_returns_fresh_instance():
+    """get_settings returns a new instance each call (overridable in tests)."""
     settings1 = get_settings()
     settings2 = get_settings()
-    assert settings1 is settings2
+    assert settings1 == settings2
+    assert settings1 is not settings2
 
 
 def test_get_internal_registry_import():

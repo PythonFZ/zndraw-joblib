@@ -3,7 +3,7 @@
 
 from zndraw_joblib.router import router
 from zndraw_joblib.models import Job, Worker, Task, WorkerJobLink, TaskStatus
-from zndraw_joblib.dependencies import get_settings, get_tsio
+from zndraw_joblib.dependencies import get_db_lock, get_settings, get_tsio
 from zndraw_joblib.exceptions import (
     ProblemException,
     problem_exception_handler,
@@ -30,14 +30,18 @@ from zndraw_joblib.sweeper import (
     run_sweeper,
     cleanup_stale_workers,
     cleanup_stuck_internal_tasks,
+    cleanup_worker,
 )
 from zndraw_joblib.events import (
+    FrozenEvent,
     JobsInvalidate,
     TaskAvailable,
     TaskStatusEvent,
     JoinJobRoom,
     LeaveJobRoom,
     Emission,
+    build_task_status_emission,
+    emit,
 )
 
 __all__ = [
@@ -50,6 +54,7 @@ __all__ = [
     "WorkerJobLink",
     "TaskStatus",
     # Dependencies
+    "get_db_lock",
     "get_settings",
     "get_tsio",
     # Exceptions
@@ -82,11 +87,15 @@ __all__ = [
     "run_sweeper",
     "cleanup_stale_workers",
     "cleanup_stuck_internal_tasks",
+    "cleanup_worker",
     # Events
+    "FrozenEvent",
     "JobsInvalidate",
     "TaskAvailable",
     "TaskStatusEvent",
     "JoinJobRoom",
     "LeaveJobRoom",
     "Emission",
+    "build_task_status_emission",
+    "emit",
 ]

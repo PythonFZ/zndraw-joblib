@@ -51,7 +51,7 @@ class WorkerResponse(BaseModel):
 
 
 class TaskSubmitRequest(BaseModel):
-    payload: dict[str, Any] = {}
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaskResponse(BaseModel):

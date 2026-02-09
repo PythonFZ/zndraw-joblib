@@ -122,21 +122,47 @@ def mock_current_user(test_user):
     return get_current_user
 
 
-@pytest.fixture
-def app(db_session, locked_db_session, test_session_factory, mock_current_user):
-    """Create a FastAPI app with dependency overrides."""
+def _build_app(
+    *,
+    db_session,
+    locked_db_session,
+    session_factory,
+    db_lock,
+    current_user,
+) -> FastAPI:
+    """Build a configured FastAPI app with standard dependency overrides."""
     from zndraw_auth import current_active_user, current_superuser, get_async_session
-    from zndraw_joblib.dependencies import get_locked_async_session, get_session_factory
+    from zndraw_joblib.dependencies import (
+        get_db_lock,
+        get_locked_async_session,
+        get_session_factory,
+    )
 
     app = FastAPI()
+    app.state.db_lock = db_lock
     app.include_router(router)
     app.add_exception_handler(ProblemException, problem_exception_handler)
     app.dependency_overrides[get_async_session] = db_session
     app.dependency_overrides[get_locked_async_session] = locked_db_session
-    app.dependency_overrides[get_session_factory] = test_session_factory
-    app.dependency_overrides[current_active_user] = mock_current_user
-    app.dependency_overrides[current_superuser] = mock_current_user
+    app.dependency_overrides[get_session_factory] = session_factory
+    app.dependency_overrides[get_db_lock] = lambda: db_lock
+    app.dependency_overrides[current_active_user] = current_user
+    app.dependency_overrides[current_superuser] = current_user
     return app
+
+
+@pytest.fixture
+def app(
+    db_session, locked_db_session, test_session_factory, test_db_lock, mock_current_user
+):
+    """Create a FastAPI app with dependency overrides."""
+    return _build_app(
+        db_session=db_session,
+        locked_db_session=locked_db_session,
+        session_factory=test_session_factory,
+        db_lock=test_db_lock,
+        current_user=mock_current_user,
+    )
 
 
 @pytest.fixture
@@ -161,11 +187,8 @@ def seeded_client(client):
 @pytest.fixture
 def client_factory(async_session_factory, test_db_lock):
     """Factory to create clients with different user identities."""
-    from zndraw_auth import current_active_user, current_superuser, get_async_session
-    from zndraw_joblib.dependencies import get_locked_async_session, get_session_factory
 
     def create_client(identity: str, is_superuser: bool = True) -> TestClient:
-        # Create a unique user ID for each identity
         user_id = uuid.uuid5(uuid.NAMESPACE_DNS, identity)
 
         user = MagicMock(spec=User)
@@ -195,17 +218,15 @@ def client_factory(async_session_factory, test_db_lock):
 
             return create_session
 
-        app = FastAPI()
-        app.include_router(router)
-        app.add_exception_handler(ProblemException, problem_exception_handler)
-        app.dependency_overrides[get_async_session] = get_test_session
-        app.dependency_overrides[get_locked_async_session] = get_locked_test_session
-        app.dependency_overrides[get_session_factory] = get_test_session_factory
-        app.dependency_overrides[current_active_user] = get_current_user
-        app.dependency_overrides[current_superuser] = get_current_user
+        app = _build_app(
+            db_session=get_test_session,
+            locked_db_session=get_locked_test_session,
+            session_factory=get_test_session_factory,
+            db_lock=test_db_lock,
+            current_user=get_current_user,
+        )
 
         test_client = TestClient(app)
-        # Attach user info for tests that need to track workers
         test_client.user_id = user_id
         return test_client
 

@@ -2,10 +2,17 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
-from uuid import uuid4
-import uuid
+from uuid import UUID, uuid4
 
-from sqlalchemy import UniqueConstraint, ForeignKey, String, Boolean, DateTime, Text
+from sqlalchemy import (
+    Index,
+    UniqueConstraint,
+    ForeignKey,
+    String,
+    Boolean,
+    DateTime,
+    Text,
+)
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from zndraw_auth import Base
@@ -28,10 +35,10 @@ class WorkerJobLink(Base):
 
     __tablename__ = "worker_job_link"
 
-    worker_id: Mapped[uuid.UUID] = mapped_column(
+    worker_id: Mapped[UUID] = mapped_column(
         ForeignKey("worker.id", ondelete="CASCADE"), primary_key=True
     )
-    job_id: Mapped[uuid.UUID] = mapped_column(
+    job_id: Mapped[UUID] = mapped_column(
         ForeignKey("job.id", ondelete="CASCADE"), primary_key=True
     )
 
@@ -42,7 +49,7 @@ class Job(Base):
         UniqueConstraint("room_id", "category", "name", name="unique_job"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     room_id: Mapped[str] = mapped_column(String, index=True)
     category: Mapped[str] = mapped_column(String, index=True)
     name: Mapped[str] = mapped_column(String, index=True)
@@ -63,8 +70,8 @@ class Job(Base):
 class Worker(Base):
     __tablename__ = "worker"
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
         ForeignKey("user.id", ondelete="CASCADE"), index=True
     )
     last_heartbeat: Mapped[datetime] = mapped_column(
@@ -83,19 +90,22 @@ class Worker(Base):
 
 class Task(Base):
     __tablename__ = "task"
+    __table_args__ = (
+        Index("ix_task_job_status_created", "job_id", "status", "created_at"),
+    )
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
 
-    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job.id"), index=True)
+    job_id: Mapped[UUID] = mapped_column(ForeignKey("job.id"), index=True)
     job: Mapped[Optional[Job]] = relationship(back_populates="tasks")
 
-    worker_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    worker_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("worker.id"), default=None, index=True, nullable=True
     )
     worker: Mapped[Optional[Worker]] = relationship(back_populates="tasks")
 
     room_id: Mapped[str] = mapped_column(String, index=True)
-    created_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    created_by_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("user.id"), default=None, index=True, nullable=True
     )
 

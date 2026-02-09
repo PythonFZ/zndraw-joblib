@@ -14,12 +14,21 @@ from zndraw_joblib.registry import (
 )
 
 
-class Rotate(Extension):
+class ConcreteExtension(Extension):
+    """Non-abstract extension base for tests that don't need run()."""
+
+    category: ClassVar[Category] = Category.MODIFIER
+
+    def run(self) -> None:
+        pass
+
+
+class Rotate(ConcreteExtension):
     category: ClassVar[Category] = Category.MODIFIER
     angle: float = 0.0
 
 
-class Scale(Extension):
+class Scale(ConcreteExtension):
     category: ClassVar[Category] = Category.MODIFIER
     factor: float = 1.0
 

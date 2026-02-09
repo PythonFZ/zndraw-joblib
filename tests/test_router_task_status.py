@@ -3,8 +3,29 @@
 
 from uuid import uuid4
 
+import pytest
+
 from zndraw_joblib.schemas import TaskResponse, TaskClaimResponse, PaginatedResponse
 from zndraw_joblib.exceptions import ProblemDetail
+
+
+@pytest.fixture
+def claimed_task_id(seeded_client):
+    """Submit a task to @global:modifiers:Rotate in room_1 and claim it.
+
+    Returns the task ID as a string.
+    """
+    seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    claim_resp = seeded_client.post(
+        "/v1/joblib/tasks/claim",
+        json={"worker_id": seeded_client.seeded_worker_id},
+    )
+    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
+    assert claim_data.task is not None
+    return str(claim_data.task.id)
 
 
 def test_get_task_status(seeded_client):
@@ -30,23 +51,10 @@ def test_get_task_not_found(seeded_client):
     assert error.status == 404
 
 
-def test_update_task_claimed_to_running(seeded_client):
-    # Submit task
-    seeded_client.post(
-        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
-        json={"payload": {}},
-    )
-    # Claim task
-    claim_resp = seeded_client.post(
-        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
-    )
-    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
-    assert claim_data.task is not None
-    task_id = str(claim_data.task.id)
-
+def test_update_task_claimed_to_running(seeded_client, claimed_task_id):
     # Update to running
     response = seeded_client.patch(
-        f"/v1/joblib/tasks/{task_id}",
+        f"/v1/joblib/tasks/{claimed_task_id}",
         json={"status": "running"},
     )
     assert response.status_code == 200
@@ -54,28 +62,19 @@ def test_update_task_claimed_to_running(seeded_client):
     assert data.status.value == "running"
 
     # Verify GET returns updated status
-    get_response = seeded_client.get(f"/v1/joblib/tasks/{task_id}")
+    get_response = seeded_client.get(f"/v1/joblib/tasks/{claimed_task_id}")
     assert get_response.status_code == 200
     get_data = TaskResponse.model_validate(get_response.json())
     assert get_data.status.value == "running"
     assert get_data.started_at is not None
 
 
-def test_update_task_running_to_completed(seeded_client):
-    seeded_client.post(
-        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
-        json={"payload": {}},
+def test_update_task_running_to_completed(seeded_client, claimed_task_id):
+    seeded_client.patch(
+        f"/v1/joblib/tasks/{claimed_task_id}", json={"status": "running"}
     )
-    claim_resp = seeded_client.post(
-        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
-    )
-    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
-    assert claim_data.task is not None
-    task_id = str(claim_data.task.id)
-
-    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
     response = seeded_client.patch(
-        f"/v1/joblib/tasks/{task_id}",
+        f"/v1/joblib/tasks/{claimed_task_id}",
         json={"status": "completed"},
     )
     assert response.status_code == 200
@@ -84,20 +83,12 @@ def test_update_task_running_to_completed(seeded_client):
     assert data.completed_at is not None
 
 
-def test_update_task_running_to_failed(seeded_client):
-    seeded_client.post(
-        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
-        json={"payload": {}},
+def test_update_task_running_to_failed(seeded_client, claimed_task_id):
+    seeded_client.patch(
+        f"/v1/joblib/tasks/{claimed_task_id}", json={"status": "running"}
     )
-    claim_resp = seeded_client.post(
-        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
-    )
-    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
-    task_id = str(claim_data.task.id)
-
-    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
     response = seeded_client.patch(
-        f"/v1/joblib/tasks/{task_id}",
+        f"/v1/joblib/tasks/{claimed_task_id}",
         json={"status": "failed", "error": "Something went wrong"},
     )
     assert response.status_code == 200
@@ -107,112 +98,60 @@ def test_update_task_running_to_failed(seeded_client):
     assert data.completed_at is not None
 
 
-def test_update_task_invalid_transition_claimed_to_completed(seeded_client):
-    """Cannot skip running and go directly to completed."""
-    seeded_client.post(
+@pytest.mark.parametrize(
+    ("pre_transitions", "invalid_status"),
+    [
+        # From PENDING (no claim, no patches)
+        ([], "completed"),
+        ([], "running"),
+        ([], "failed"),
+        # From CLAIMED (claim only, no further patches)
+        (["claimed"], "completed"),
+        (["claimed"], "pending"),
+        # From RUNNING (claim + running patch)
+        (["claimed", "running"], "pending"),
+        (["claimed", "running"], "claimed"),
+    ],
+    ids=[
+        "pending-to-completed",
+        "pending-to-running",
+        "pending-to-failed",
+        "claimed-to-completed",
+        "claimed-to-pending",
+        "running-to-pending",
+        "running-to-claimed",
+    ],
+)
+def test_update_task_invalid_transition(seeded_client, pre_transitions, invalid_status):
+    """Invalid status transitions must return 409 Conflict."""
+    # Submit a task
+    submit_resp = seeded_client.post(
         "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
         json={"payload": {}},
     )
-    claim_resp = seeded_client.post(
-        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
-    )
-    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
-    task_id = str(claim_data.task.id)
+    task_id = submit_resp.json()["id"]
 
+    # Apply pre-transitions to reach the desired starting state
+    for transition in pre_transitions:
+        if transition == "claimed":
+            claim_resp = seeded_client.post(
+                "/v1/joblib/tasks/claim",
+                json={"worker_id": seeded_client.seeded_worker_id},
+            )
+            claim_data = TaskClaimResponse.model_validate(claim_resp.json())
+            assert claim_data.task is not None
+            task_id = str(claim_data.task.id)
+        else:
+            resp = seeded_client.patch(
+                f"/v1/joblib/tasks/{task_id}",
+                json={"status": transition},
+            )
+            assert resp.status_code == 200
+
+    # Attempt the invalid transition
     response = seeded_client.patch(
         f"/v1/joblib/tasks/{task_id}",
-        json={"status": "completed"},
-    )
-    assert response.status_code == 409
-    error = ProblemDetail.model_validate(response.json())
-    assert error.status == 409
-
-
-def test_update_task_invalid_transition_running_to_pending(seeded_client):
-    """Cannot go backwards from running to pending."""
-    seeded_client.post(
-        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
-        json={"payload": {}},
-    )
-    claim_resp = seeded_client.post(
-        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
-    )
-    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
-    task_id = str(claim_data.task.id)
-
-    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
-    response = seeded_client.patch(
-        f"/v1/joblib/tasks/{task_id}",
-        json={"status": "pending"},
-    )
-    assert response.status_code == 409
-    error = ProblemDetail.model_validate(response.json())
-    assert error.status == 409
-
-
-def test_update_task_invalid_transition_completed_to_failed(seeded_client):
-    """Cannot transition from completed to failed."""
-    seeded_client.post(
-        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
-        json={"payload": {}},
-    )
-    claim_resp = seeded_client.post(
-        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
-    )
-    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
-    task_id = str(claim_data.task.id)
-
-    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
-    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "completed"})
-    response = seeded_client.patch(
-        f"/v1/joblib/tasks/{task_id}",
-        json={"status": "failed"},
-    )
-    assert response.status_code == 409
-    error = ProblemDetail.model_validate(response.json())
-    assert error.status == 409
-
-
-def test_update_task_invalid_transition_completed_to_running(seeded_client):
-    """Cannot go backwards from completed to running."""
-    seeded_client.post(
-        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
-        json={"payload": {}},
-    )
-    claim_resp = seeded_client.post(
-        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
-    )
-    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
-    task_id = str(claim_data.task.id)
-
-    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
-    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "completed"})
-    response = seeded_client.patch(
-        f"/v1/joblib/tasks/{task_id}",
-        json={"status": "running"},
-    )
-    assert response.status_code == 409
-    error = ProblemDetail.model_validate(response.json())
-    assert error.status == 409
-
-
-def test_update_task_invalid_transition_failed_to_running(seeded_client):
-    """Cannot go backwards from failed to running."""
-    seeded_client.post(
-        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
-        json={"payload": {}},
-    )
-    claim_resp = seeded_client.post(
-        "/v1/joblib/tasks/claim", json={"worker_id": seeded_client.seeded_worker_id}
-    )
-    claim_data = TaskClaimResponse.model_validate(claim_resp.json())
-    task_id = str(claim_data.task.id)
-
-    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "running"})
-    seeded_client.patch(f"/v1/joblib/tasks/{task_id}", json={"status": "failed"})
-    response = seeded_client.patch(
-        f"/v1/joblib/tasks/{task_id}",
-        json={"status": "running"},
+        json={"status": invalid_status},
     )
     assert response.status_code == 409
     error = ProblemDetail.model_validate(response.json())
@@ -623,3 +562,49 @@ def test_parse_prefer_wait_various_formats():
     assert parse_prefer_wait("wait=30, respond-async") == 30
     assert parse_prefer_wait("respond-async, wait=60") == 60
     assert parse_prefer_wait("respond-async") is None
+
+
+def test_update_task_pending_to_cancelled(seeded_client):
+    """PENDING → CANCELLED should return 200 with completed_at set."""
+    submit_resp = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    task_id = submit_resp.json()["id"]
+
+    response = seeded_client.patch(
+        f"/v1/joblib/tasks/{task_id}",
+        json={"status": "cancelled"},
+    )
+    assert response.status_code == 200
+    data = TaskResponse.model_validate(response.json())
+    assert data.status.value == "cancelled"
+    assert data.completed_at is not None
+
+
+def test_update_task_claimed_to_cancelled(seeded_client, claimed_task_id):
+    """CLAIMED → CANCELLED should return 200 with completed_at set."""
+    response = seeded_client.patch(
+        f"/v1/joblib/tasks/{claimed_task_id}",
+        json={"status": "cancelled"},
+    )
+    assert response.status_code == 200
+    data = TaskResponse.model_validate(response.json())
+    assert data.status.value == "cancelled"
+    assert data.completed_at is not None
+
+
+def test_prefer_wait_non_numeric_returns_immediately(seeded_client):
+    """Prefer: wait=abc should be ignored (returns immediately)."""
+    submit_resp = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    task_id = submit_resp.json()["id"]
+
+    response = seeded_client.get(
+        f"/v1/joblib/tasks/{task_id}",
+        headers={"Prefer": "wait=abc"},
+    )
+    assert response.status_code == 200
+    assert "Preference-Applied" not in response.headers

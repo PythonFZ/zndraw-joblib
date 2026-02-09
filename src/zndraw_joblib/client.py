@@ -2,7 +2,9 @@
 """Client SDK for ZnDraw JobLib workers."""
 
 import logging
+import threading
 import time
+from abc import ABC, abstractmethod
 from enum import Enum
 from typing import ClassVar, Generic, Iterator, Protocol, TypeVar
 from uuid import UUID
@@ -29,18 +31,19 @@ class Category(str, Enum):
     ANALYSIS = "analysis"
 
 
-class Extension(BaseModel):
+class Extension(BaseModel, ABC):
     """Base class for all ZnDraw extensions.
 
     Extensions are Pydantic models that define their parameters as fields.
     The JSON schema is generated from the model for the frontend forms.
+    Subclasses must implement run().
     """
 
     category: ClassVar[Category]
 
+    @abstractmethod
     def run(self) -> None:
-        """Execute the extension logic. Override in subclasses."""
-        raise NotImplementedError(f"{self.__class__.__name__}.run() not implemented")
+        """Execute the extension logic. Must be overridden in subclasses."""
 
 
 E = TypeVar("E", bound=Extension)
@@ -76,9 +79,7 @@ class ClaimedTask(Generic[E]):
 class JobManager:
     """Main entry point for workers. Registers jobs and claims tasks."""
 
-    def __init__(
-        self, api: ApiManager, tsio: SyncClientWrapper | None = None
-    ):
+    def __init__(self, api: ApiManager, tsio: SyncClientWrapper | None = None):
         self.api = api
         self.tsio = tsio
         self._registry: dict[str, type[Extension]] = {}
@@ -223,13 +224,18 @@ class JobManager:
             extension=extension,
         )
 
-    def listen(self, polling_interval: float = 2.0) -> Iterator[ClaimedTask]:
+    def listen(
+        self,
+        polling_interval: float = 2.0,
+        stop_event: threading.Event | None = None,
+    ) -> Iterator[ClaimedTask]:
         """
         Generator that yields claimed tasks indefinitely.
 
         Polls the server for tasks at the specified interval.
+        Pass a threading.Event as stop_event for graceful shutdown.
         """
-        while True:
+        while not (stop_event and stop_event.is_set()):
             claimed = self.claim()
             if claimed is not None:
                 yield claimed

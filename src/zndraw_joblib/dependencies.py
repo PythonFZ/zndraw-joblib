@@ -1,7 +1,6 @@
 # src/zndraw_joblib/dependencies.py
 import asyncio
 from contextlib import asynccontextmanager
-from functools import lru_cache
 from typing import Annotated, AsyncGenerator, Callable
 
 from fastapi import Depends, HTTPException, Request, status
@@ -14,14 +13,21 @@ from zndraw_socketio import AsyncServerWrapper
 from zndraw_joblib.registry import InternalRegistry
 from zndraw_joblib.settings import JobLibSettings
 
-# Global lock for serializing database access (SQLite compatibility)
-_db_lock = asyncio.Lock()
 
-
-@lru_cache
 def get_settings() -> JobLibSettings:
-    """Returns cached settings instance."""
+    """Create a settings instance from environment variables.
+
+    Override this dependency in tests to inject custom settings.
+    """
     return JobLibSettings()
+
+
+async def get_db_lock(request: Request) -> asyncio.Lock:
+    """Return the database lock from app.state.
+
+    The lock must be initialized via the joblib_lifespan context manager.
+    """
+    return request.app.state.db_lock
 
 
 async def get_session_factory(
@@ -44,6 +50,7 @@ async def get_session_factory(
 async def get_locked_async_session(
     auth_settings: Annotated[AuthSettings, Depends(get_auth_settings)],
     joblib_settings: Annotated[JobLibSettings, Depends(get_settings)],
+    db_lock: Annotated[asyncio.Lock, Depends(get_db_lock)],
 ) -> AsyncGenerator[AsyncSession, None]:
     """Session dependency that optionally acquires a lock for SQLite compatibility.
 
@@ -59,7 +66,7 @@ async def get_locked_async_session(
     if joblib_settings.enable_db_lock:
         try:
             await asyncio.wait_for(
-                _db_lock.acquire(),
+                db_lock.acquire(),
                 timeout=joblib_settings.db_lock_timeout_seconds,
             )
         except asyncio.TimeoutError:
@@ -71,7 +78,7 @@ async def get_locked_async_session(
             async for session in get_async_session(auth_settings):
                 yield session
         finally:
-            _db_lock.release()
+            db_lock.release()
     else:
         # PostgreSQL mode: no locking needed
         async for session in get_async_session(auth_settings):

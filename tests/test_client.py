@@ -20,6 +20,15 @@ from zndraw_joblib.schemas import (
 )
 
 
+class ConcreteExtension(Extension):
+    """Non-abstract extension base for tests that don't need run()."""
+
+    category: ClassVar[Category] = Category.MODIFIER
+
+    def run(self) -> None:
+        pass
+
+
 class MockClientApi:
     """Adapter to make TestClient work with JobManager's ApiManager protocol."""
 
@@ -49,67 +58,43 @@ def test_category_enum():
 def test_extension_requires_category():
     """Extension subclasses must define category."""
 
-    class ValidExtension(Extension):
+    class ValidExtension(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
         value: int = 0
 
     assert ValidExtension.category == Category.MODIFIER
 
 
-def test_job_manager_register_modifier(client):
-    """JobManager.register should create job with MODIFIER category."""
+@pytest.mark.parametrize(
+    "category, expected_value",
+    [
+        (Category.MODIFIER, "modifiers"),
+        (Category.SELECTION, "selections"),
+        (Category.ANALYSIS, "analysis"),
+    ],
+)
+def test_job_manager_register_category(client, category, expected_value):
+    """JobManager.register should create job with the given category."""
     api = MockClientApi(client)
     manager = JobManager(api)
 
-    @manager.register
-    class Rotate(Extension):
-        category: ClassVar[Category] = Category.MODIFIER
-        angle: float = 0.0
+    # Dynamically create a class with the given category
+    ext_cls = type(
+        "TestExt",
+        (ConcreteExtension,),
+        {"__annotations__": {"category": ClassVar[Category]}, "category": category},
+    )
 
-    assert "@global:modifiers:Rotate" in manager
+    manager.register(ext_cls)
+
+    full_name = f"@global:{expected_value}:TestExt"
+    assert full_name in manager
 
     response = client.get("/v1/joblib/rooms/@global/jobs")
     assert response.status_code == 200
     page = PaginatedResponse[JobSummary].model_validate(response.json())
     job_names = [j.full_name for j in page.items]
-    assert "@global:modifiers:Rotate" in job_names
-
-
-def test_job_manager_register_selection(client):
-    """JobManager.register should create job with SELECTION category."""
-    api = MockClientApi(client)
-    manager = JobManager(api)
-
-    @manager.register
-    class SelectAll(Extension):
-        category: ClassVar[Category] = Category.SELECTION
-
-    assert "@global:selections:SelectAll" in manager
-
-    response = client.get("/v1/joblib/rooms/@global/jobs")
-    assert response.status_code == 200
-    page = PaginatedResponse[JobSummary].model_validate(response.json())
-    job_names = [j.full_name for j in page.items]
-    assert "@global:selections:SelectAll" in job_names
-
-
-def test_job_manager_register_analysis(client):
-    """JobManager.register should create job with ANALYSIS category."""
-    api = MockClientApi(client)
-    manager = JobManager(api)
-
-    @manager.register
-    class Measure(Extension):
-        category: ClassVar[Category] = Category.ANALYSIS
-        property_name: str = "distance"
-
-    assert "@global:analysis:Measure" in manager
-
-    response = client.get("/v1/joblib/rooms/@global/jobs")
-    assert response.status_code == 200
-    page = PaginatedResponse[JobSummary].model_validate(response.json())
-    job_names = [j.full_name for j in page.items]
-    assert "@global:analysis:Measure" in job_names
+    assert full_name in job_names
 
 
 def test_job_manager_register_with_room(client):
@@ -118,7 +103,7 @@ def test_job_manager_register_with_room(client):
     manager = JobManager(api)
 
     @manager.register(room="my_room")
-    class PrivateJob(Extension):
+    class PrivateJob(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
         data: str = ""
 
@@ -137,7 +122,7 @@ def test_job_manager_getitem_returns_class(client):
     manager = JobManager(api)
 
     @manager.register
-    class MyJob(Extension):
+    class MyJob(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
         x: int = 0
 
@@ -152,13 +137,13 @@ def test_job_manager_len(client):
     assert len(manager) == 0
 
     @manager.register
-    class Job1(Extension):
+    class Job1(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
 
     assert len(manager) == 1
 
     @manager.register
-    class Job2(Extension):
+    class Job2(ConcreteExtension):
         category: ClassVar[Category] = Category.SELECTION
 
     assert len(manager) == 2
@@ -170,11 +155,11 @@ def test_job_manager_iter(client):
     manager = JobManager(api)
 
     @manager.register
-    class JobA(Extension):
+    class JobA(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
 
     @manager.register
-    class JobB(Extension):
+    class JobB(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
 
     names = list(manager)
@@ -188,7 +173,7 @@ def test_job_manager_schema_sent_to_server(client):
     manager = JobManager(api)
 
     @manager.register
-    class Rotate(Extension):
+    class Rotate(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
         angle: float = 0.0
         axis: str = "z"
@@ -208,7 +193,7 @@ def test_job_manager_listen_yields_extension_instance(client):
     manager = JobManager(api)
 
     @manager.register
-    class Rotate(Extension):
+    class Rotate(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
         angle: float = 0.0
 
@@ -235,7 +220,7 @@ def test_job_manager_listen_returns_none_when_empty(client):
     manager = JobManager(api)
 
     @manager.register
-    class EmptyJob(Extension):
+    class EmptyJob(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
 
     # No tasks submitted - claim should return None
@@ -249,7 +234,7 @@ def test_job_manager_claim_until_empty(client):
     manager = JobManager(api)
 
     @manager.register
-    class BatchJob(Extension):
+    class BatchJob(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
         index: int = 0
 
@@ -283,7 +268,7 @@ def test_job_manager_heartbeat(client):
     manager = JobManager(api)
 
     @manager.register
-    class HeartbeatJob(Extension):
+    class HeartbeatJob(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
 
     # The worker_id was set during register - use that
@@ -303,7 +288,7 @@ def test_job_manager_complete_workflow(client):
     manager = JobManager(api)
 
     @manager.register
-    class ProcessData(Extension):
+    class ProcessData(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
         input_file: str = ""
         output_file: str = ""
@@ -355,7 +340,7 @@ def test_job_manager_claimed_task_has_metadata(client):
     manager = JobManager(api)
 
     @manager.register
-    class MetadataJob(Extension):
+    class MetadataJob(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
         value: int = 42
 
@@ -379,7 +364,7 @@ def test_job_manager_submit(client):
     manager = JobManager(api)
 
     @manager.register
-    class SubmitJob(Extension):
+    class SubmitJob(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
         value: int = 0
 
@@ -420,7 +405,7 @@ def test_job_manager_register_emits_join_job_room(client):
     manager = JobManager(api, tsio=mock_tsio)
 
     @manager.register
-    class Rotate(Extension):
+    class Rotate(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
         angle: float = 0.0
 
@@ -437,11 +422,11 @@ def test_job_manager_register_emits_join_for_each_job(client):
     manager = JobManager(api, tsio=mock_tsio)
 
     @manager.register
-    class Job1(Extension):
+    class Job1(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
 
     @manager.register
-    class Job2(Extension):
+    class Job2(ConcreteExtension):
         category: ClassVar[Category] = Category.SELECTION
 
     assert mock_tsio.emit.call_count == 2
@@ -456,7 +441,7 @@ def test_job_manager_register_no_tsio_no_emit(client):
     manager = JobManager(api)
 
     @manager.register
-    class NoTsioJob(Extension):
+    class NoTsioJob(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
 
     assert "@global:modifiers:NoTsioJob" in manager
@@ -469,9 +454,15 @@ def test_job_manager_register_room_emits_correct_job_name(client):
     manager = JobManager(api, tsio=mock_tsio)
 
     @manager.register(room="my_room")
-    class PrivateJob(Extension):
+    class PrivateJob(ConcreteExtension):
         category: ClassVar[Category] = Category.MODIFIER
 
     event = mock_tsio.emit.call_args[0][0]
     assert isinstance(event, JoinJobRoom)
     assert event.job_name == "my_room:modifiers:PrivateJob"
+
+
+def test_extension_cannot_be_instantiated_directly():
+    """Extension base class cannot be instantiated (ABC)."""
+    with pytest.raises(TypeError, match="Can't instantiate abstract class"):
+        Extension()

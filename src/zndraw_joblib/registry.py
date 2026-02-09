@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from contextlib import AbstractAsyncContextManager
+
+    from fastapi import FastAPI
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 from taskiq import AsyncBroker
 
@@ -56,7 +63,7 @@ def register_internal_tasks(
             cls: type[Extension] = ext_cls, ex: InternalExecutor = executor
         ):
             async def _execute(
-                task_id: str, room_id: str, payload: dict, base_url: str
+                task_id: str, room_id: str, payload: dict[str, Any], base_url: str
             ) -> None:
                 await ex(cls, payload, room_id, task_id, base_url)
 
@@ -76,11 +83,11 @@ def register_internal_tasks(
 
 
 async def register_internal_jobs(
-    app: Any,
+    app: "FastAPI",
     broker: AsyncBroker,
     extensions: list[type[Extension]],
     executor: InternalExecutor,
-    session_factory: Any,
+    session_factory: "Callable[[], AbstractAsyncContextManager[AsyncSession]]",
 ) -> None:
     """Register internal extensions for server-side execution.
 

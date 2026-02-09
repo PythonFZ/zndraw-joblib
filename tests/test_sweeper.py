@@ -1,6 +1,7 @@
 # tests/test_sweeper.py
 """Tests for the sweeper background task."""
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -9,10 +10,12 @@ from sqlalchemy import select
 
 from zndraw_joblib.events import JobsInvalidate, TaskStatusEvent
 from zndraw_joblib.models import Worker, Job, Task, TaskStatus, WorkerJobLink
+from zndraw_joblib.settings import JobLibSettings
 from zndraw_joblib.sweeper import (
     cleanup_stale_workers,
-    _cleanup_worker,
+    cleanup_worker,
     cleanup_stuck_internal_tasks,
+    run_sweeper,
 )
 
 
@@ -276,7 +279,7 @@ async def test_cleanup_multiple_stale_workers(async_session_factory, test_user_i
 
 @pytest.mark.asyncio
 async def test_cleanup_worker_removes_links(async_session_factory, test_user_id):
-    """_cleanup_worker should remove worker-job links."""
+    """cleanup_worker should remove worker-job links."""
     worker_id = uuid.uuid4()
 
     async with async_session_factory() as session:
@@ -299,7 +302,7 @@ async def test_cleanup_worker_removes_links(async_session_factory, test_user_id)
         # Now cleanup
         result = await session.execute(select(Worker).where(Worker.id == worker_id))
         worker = result.scalar_one_or_none()
-        await _cleanup_worker(session, worker)
+        await cleanup_worker(session, worker)
         await session.commit()
 
     # Verify link is removed
@@ -445,7 +448,7 @@ async def test_cleanup_stuck_skips_external_tasks(async_session_factory):
 async def test_cleanup_worker_returns_task_status_emissions(
     async_session_factory, test_user_id
 ):
-    """_cleanup_worker should return TaskStatusEvent emissions for failed tasks."""
+    """cleanup_worker should return TaskStatusEvent emissions for failed tasks."""
     worker_id = uuid.uuid4()
 
     async with async_session_factory() as session:
@@ -473,7 +476,7 @@ async def test_cleanup_worker_returns_task_status_emissions(
     async with async_session_factory() as session:
         result = await session.execute(select(Worker).where(Worker.id == worker_id))
         worker = result.scalar_one()
-        emissions = await _cleanup_worker(session, worker)
+        emissions = await cleanup_worker(session, worker)
         await session.commit()
 
     # Should have TaskStatusEvent for the failed task + JobsInvalidate for orphan job
@@ -535,3 +538,52 @@ async def test_cleanup_stuck_internal_returns_emissions(async_session_factory):
         assert task_events[0].event.id == str(task_id)
         assert task_events[0].event.status == "failed"
         assert task_events[0].room == "room:test-room"
+
+
+@pytest.mark.asyncio
+async def test_run_sweeper_cleans_up_stale_workers(async_session_factory, test_user_id):
+    """run_sweeper should periodically clean up stale workers in a background task."""
+    stale_worker_id = uuid.uuid4()
+
+    # Create a stale worker (heartbeat 2 minutes ago)
+    async with async_session_factory() as session:
+        stale_time = datetime.now(timezone.utc) - timedelta(minutes=2)
+        worker = Worker(
+            id=stale_worker_id, user_id=test_user_id, last_heartbeat=stale_time
+        )
+        session.add(worker)
+        await session.commit()
+
+    # Create custom settings with very short intervals
+    settings = JobLibSettings(
+        sweeper_interval_seconds=1,  # 1 second interval
+        worker_timeout_seconds=1,  # 1 second timeout
+    )
+
+    # Create session generator
+    async def get_session():
+        async with async_session_factory() as session:
+            yield session
+
+    # Start the sweeper as a background task
+    sweeper_task = asyncio.create_task(run_sweeper(get_session, settings, None))
+
+    try:
+        # Wait for one sweep cycle (give it time to run at least once)
+        await asyncio.sleep(1.5)
+
+        # Verify the stale worker was cleaned up
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(Worker).where(Worker.id == stale_worker_id)
+            )
+            worker = result.scalar_one_or_none()
+            assert worker is None, "Stale worker should have been cleaned up"
+
+    finally:
+        # Cancel the sweeper task
+        sweeper_task.cancel()
+        try:
+            await sweeper_task
+        except asyncio.CancelledError:
+            pass  # Expected when cancelling

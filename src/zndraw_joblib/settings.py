@@ -8,7 +8,7 @@ class JobLibSettings(BaseSettings):
     allowed_categories: list[str] = ["modifiers", "selections", "analysis"]
     worker_timeout_seconds: int = 60
     sweeper_interval_seconds: int = 30
-    long_poll_max_wait_seconds: int = 120
+    long_poll_max_wait_seconds: int = 60
 
     # Task claim retry settings (for handling concurrent claim contention)
     claim_max_attempts: int = 10

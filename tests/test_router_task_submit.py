@@ -91,3 +91,65 @@ def test_submit_external_task_unchanged(seeded_client):
     )
     assert resp.status_code == 202
     assert resp.json()["status"] == "pending"
+
+
+def test_submit_task_malformed_job_name_no_colons(seeded_client):
+    """Submitting with a job name that has no colons returns 404."""
+    response = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/noColons",
+        json={"payload": {}},
+    )
+    assert response.status_code == 404
+    error = ProblemDetail.model_validate(response.json())
+    assert "Invalid job name format" in error.detail
+
+
+def test_submit_task_malformed_job_name_one_colon(seeded_client):
+    """Submitting with a job name that has only one colon returns 404."""
+    response = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/one:part",
+        json={"payload": {}},
+    )
+    assert response.status_code == 404
+    error = ProblemDetail.model_validate(response.json())
+    assert "Invalid job name format" in error.detail
+
+
+def test_submit_task_cross_room_access_rejected(client):
+    """Job registered in room_A cannot be submitted to from room_B."""
+    # Register a room-scoped job in room_A
+    client.put(
+        "/v1/joblib/rooms/room_A/jobs",
+        json={"category": "modifiers", "name": "Private", "schema": {}},
+    )
+
+    # Try to submit a task from room_B to room_A's job
+    response = client.post(
+        "/v1/joblib/rooms/room_B/tasks/room_A:modifiers:Private",
+        json={"payload": {}},
+    )
+    assert response.status_code == 404
+    error = ProblemDetail.model_validate(response.json())
+    assert "not accessible" in error.detail
+
+
+def test_submit_task_invalid_room_id(seeded_client):
+    """Submitting to a room with @ in the name returns 400."""
+    response = seeded_client.post(
+        "/v1/joblib/rooms/bad@room/tasks/@global:modifiers:Rotate",
+        json={"payload": {}},
+    )
+    assert response.status_code == 400
+    error = ProblemDetail.model_validate(response.json())
+    assert "invalid characters" in error.detail
+
+
+def test_submit_task_empty_payload(seeded_client):
+    """Submitting with no payload key defaults to empty dict."""
+    response = seeded_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:Rotate",
+        json={},
+    )
+    assert response.status_code == 202
+    data = TaskResponse.model_validate(response.json())
+    assert data.payload == {}
