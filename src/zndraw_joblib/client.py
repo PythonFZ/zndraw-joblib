@@ -180,7 +180,11 @@ class JobManager:
         self._registry[full_name] = cls
 
         if self.tsio is not None:
-            self.tsio.emit(JoinJobRoom(job_name=full_name))
+            self.tsio.emit(
+                JoinJobRoom(
+                    job_name=full_name, worker_id=str(self._worker_id)
+                )
+            )
 
     def claim(self) -> ClaimedTask | None:
         """

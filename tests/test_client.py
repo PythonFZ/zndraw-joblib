@@ -413,6 +413,7 @@ def test_job_manager_register_emits_join_job_room(client):
     event = mock_tsio.emit.call_args[0][0]
     assert isinstance(event, JoinJobRoom)
     assert event.job_name == "@global:modifiers:Rotate"
+    assert event.worker_id == str(manager.worker_id)
 
 
 def test_job_manager_register_emits_join_for_each_job(client):
@@ -431,8 +432,9 @@ def test_job_manager_register_emits_join_for_each_job(client):
 
     assert mock_tsio.emit.call_count == 2
     events = [call[0][0] for call in mock_tsio.emit.call_args_list]
-    assert events[0] == JoinJobRoom(job_name="@global:modifiers:Job1")
-    assert events[1] == JoinJobRoom(job_name="@global:selections:Job2")
+    worker_id = str(manager.worker_id)
+    assert events[0] == JoinJobRoom(job_name="@global:modifiers:Job1", worker_id=worker_id)
+    assert events[1] == JoinJobRoom(job_name="@global:selections:Job2", worker_id=worker_id)
 
 
 def test_job_manager_register_no_tsio_no_emit(client):
@@ -460,6 +462,7 @@ def test_job_manager_register_room_emits_correct_job_name(client):
     event = mock_tsio.emit.call_args[0][0]
     assert isinstance(event, JoinJobRoom)
     assert event.job_name == "my_room:modifiers:PrivateJob"
+    assert event.worker_id == str(manager.worker_id)
 
 
 def test_extension_cannot_be_instantiated_directly():
