@@ -20,7 +20,9 @@ def test_jobs_invalidate_frozen():
 
 
 def test_task_available_frozen():
-    ev = TaskAvailable(job_name="@global:modifiers:Rotate", room_id="room1", task_id="abc")
+    ev = TaskAvailable(
+        job_name="@global:modifiers:Rotate", room_id="room1", task_id="abc"
+    )
     assert ev.job_name == "@global:modifiers:Rotate"
     # Frozen: assignment should raise
     try:
@@ -57,11 +59,15 @@ def test_emission_dedup_task_status():
     now = datetime.now(timezone.utc)
     emissions = {
         Emission(
-            TaskStatusEvent(id="a", name="j", room_id="r", status="failed", created_at=now),
+            TaskStatusEvent(
+                id="a", name="j", room_id="r", status="failed", created_at=now
+            ),
             "room:r",
         ),
         Emission(
-            TaskStatusEvent(id="b", name="j", room_id="r", status="failed", created_at=now),
+            TaskStatusEvent(
+                id="b", name="j", room_id="r", status="failed", created_at=now
+            ),
             "room:r",
         ),
     }

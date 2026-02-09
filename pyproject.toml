@@ -17,6 +17,7 @@ dependencies = [
     "taskiq>=0.12.1",
     "taskiq-redis>=1.2.2",
     "zndraw-auth",
+    "zndraw-socketio",
 ]
 
 [tool.hatch.build.targets.wheel]

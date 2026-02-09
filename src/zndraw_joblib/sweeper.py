@@ -80,9 +80,7 @@ async def _soft_delete_orphan_job(
     return set()
 
 
-async def _cleanup_worker(
-    session: AsyncSession, worker: Worker
-) -> set[Emission]:
+async def _cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission]:
     """Clean up a worker by failing tasks, removing links, and soft-deleting orphan jobs.
 
     This is the shared cleanup logic used by both delete_worker endpoint and sweeper.
@@ -237,7 +235,9 @@ async def run_sweeper(
                 if tsio and emissions:
                     for em in emissions:
                         await tsio.emit(
-                            em.event.__class__.__name__, em.event.model_dump(), room=em.room
+                            em.event.__class__.__name__,
+                            em.event.model_dump(),
+                            room=em.room,
                         )
 
             async for session in get_session():
@@ -249,7 +249,9 @@ async def run_sweeper(
                 if tsio and emissions:
                     for em in emissions:
                         await tsio.emit(
-                            em.event.__class__.__name__, em.event.model_dump(), room=em.room
+                            em.event.__class__.__name__,
+                            em.event.model_dump(),
+                            room=em.room,
                         )
         except Exception as e:
             logger.exception("Error in sweeper: %s", e)

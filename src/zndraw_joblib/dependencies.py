@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from zndraw_auth import get_async_session
 from zndraw_auth.settings import AuthSettings, get_auth_settings
 
+from zndraw_socketio import AsyncServerWrapper
+
 from zndraw_joblib.registry import InternalRegistry
 from zndraw_joblib.settings import JobLibSettings
 
@@ -81,7 +83,7 @@ async def get_internal_registry(request: Request) -> InternalRegistry | None:
     return getattr(request.app.state, "internal_registry", None)
 
 
-async def get_tsio():
+async def get_tsio() -> AsyncServerWrapper | None:
     """Return the Socket.IO server wrapper for emitting events.
 
     Override this dependency in the host app to provide a real

@@ -20,6 +20,8 @@ from zndraw_joblib.dependencies import (
     get_internal_registry,
     get_tsio,
 )
+from zndraw_socketio import AsyncServerWrapper
+
 from zndraw_joblib.events import (
     Emission,
     JobsInvalidate,
@@ -70,7 +72,7 @@ LockedSessionDep = Annotated[AsyncSession, Depends(get_locked_async_session)]
 SettingsDep = Annotated[JobLibSettings, Depends(get_settings)]
 SessionFactoryDep = Annotated[object, Depends(get_session_factory)]
 InternalRegistryDep = Annotated[InternalRegistry | None, Depends(get_internal_registry)]
-TsioDep = Annotated[object | None, Depends(get_tsio)]
+TsioDep = Annotated[AsyncServerWrapper | None, Depends(get_tsio)]
 
 # Valid status transitions
 VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
@@ -209,7 +211,7 @@ async def _task_status_emission(session: AsyncSession, task: Task) -> Emission:
     )
 
 
-async def _emit(tsio: object | None, emissions: set[Emission]) -> None:
+async def _emit(tsio: AsyncServerWrapper | None, emissions: set[Emission]) -> None:
     """Emit a set of events if tsio is available."""
     if not tsio:
         return

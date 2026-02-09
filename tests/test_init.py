@@ -54,6 +54,11 @@ def test_all_exports_in_dunder_all():
         "run_sweeper",
         "cleanup_stale_workers",
         "cleanup_stuck_internal_tasks",
+        "get_tsio",
+        "JobsInvalidate",
+        "TaskAvailable",
+        "TaskStatusEvent",
+        "Emission",
     ]
 
     for name in expected:
