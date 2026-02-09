@@ -59,7 +59,7 @@ class Job(Base):
     # Relationships
     tasks: Mapped[list["Task"]] = relationship(back_populates="job")
     workers: Mapped[list["Worker"]] = relationship(
-        back_populates="jobs", secondary="worker_job_link"
+        back_populates="jobs", secondary="worker_job_link", passive_deletes=True
     )
 
     @property
@@ -80,7 +80,7 @@ class Worker(Base):
 
     # Relationships
     jobs: Mapped[list[Job]] = relationship(
-        back_populates="workers", secondary="worker_job_link"
+        back_populates="workers", secondary="worker_job_link", passive_deletes=True
     )
     tasks: Mapped[list["Task"]] = relationship(back_populates="worker")
 

@@ -47,13 +47,15 @@ def test_user(test_user_id):
 
 
 @pytest.fixture
-def async_engine():
+async def async_engine():
     """Create an async in-memory SQLite database engine."""
-    return create_async_engine(
+    engine = create_async_engine(
         "sqlite+aiosqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    yield engine
+    await engine.dispose()
 
 
 @pytest.fixture
