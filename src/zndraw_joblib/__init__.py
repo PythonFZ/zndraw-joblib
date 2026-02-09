@@ -35,6 +35,8 @@ from zndraw_joblib.events import (
     JobsInvalidate,
     TaskAvailable,
     TaskStatusEvent,
+    JoinJobRoom,
+    LeaveJobRoom,
     Emission,
 )
 
@@ -84,5 +86,7 @@ __all__ = [
     "JobsInvalidate",
     "TaskAvailable",
     "TaskStatusEvent",
+    "JoinJobRoom",
+    "LeaveJobRoom",
     "Emission",
 ]

@@ -58,6 +58,8 @@ def test_all_exports_in_dunder_all():
         "JobsInvalidate",
         "TaskAvailable",
         "TaskStatusEvent",
+        "JoinJobRoom",
+        "LeaveJobRoom",
         "Emission",
     ]
 

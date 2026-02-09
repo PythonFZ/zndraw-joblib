@@ -308,20 +308,85 @@ class Task(SQLModel, table=True):
 - Returns `Preference-Applied: wait` header if honored
 - Maximum wait capped by `settings.long_poll_max_wait_seconds`
 
+## Socket.IO Real-Time Events
+
+The package emits real-time events via [zndraw-socketio](https://github.com/zincware/zndraw-socketio). The host app provides its `AsyncServerWrapper` through dependency injection:
+
+```python
+from zndraw_socketio import wrap, AsyncServerWrapper
+from zndraw_joblib.dependencies import get_tsio
+
+tsio = wrap(socketio.AsyncServer(async_mode="asgi"))
+
+app.dependency_overrides[get_tsio] = lambda: tsio
+```
+
+When `get_tsio` returns `None` (default), all event emissions are skipped.
+
+### Event Models
+
+All models are frozen Pydantic `BaseModel`s (hashable for set-based deduplication).
+
+| Event | Payload | Room Target | Trigger |
+|-------|---------|-------------|---------|
+| `JobsInvalidate` | *(none)* | `room:{room_id}` | Job registered/deleted, worker connected/disconnected |
+| `TaskAvailable` | `job_name`, `room_id`, `task_id` | `jobs:{full_name}` | Task submitted (non-`@internal` only) |
+| `TaskStatusEvent` | `id`, `name`, `room_id`, `status`, timestamps, `worker_id`, `error` | `room:{room_id}` | Any task status transition |
+| `JoinJobRoom` | `job_name` | *(client → server)* | Worker joins a job's notification room after REST registration |
+| `LeaveJobRoom` | `job_name` | *(client → server)* | Worker leaves a job's notification room |
+
+Event names are auto-derived as snake_case by zndraw-socketio: `jobs_invalidate`, `task_available`, `task_status_event`, `join_job_room`, `leave_job_room`.
+
+### Worker Notification Pattern
+
+Workers (e.g., the `ZnDraw` client class) register jobs via REST, then join the socketio room to receive task notifications:
+
+```python
+# 1. Register job via REST
+client.put("/v1/joblib/rooms/@global/jobs", json={...})
+
+# 2. Join the job's socketio room
+await sio.emit(JoinJobRoom(job_name="@global:modifiers:Rotate"))
+
+# 3. Receive TaskAvailable when tasks are submitted
+@sio.on(TaskAvailable)
+async def on_task_available(sid: str, data: TaskAvailable):
+    await worker.claim_and_run(data.job_name)
+```
+
+The host app registers the room join/leave handlers:
+
+```python
+@tsio.on(JoinJobRoom)
+async def handle_join(sid: str, data: JoinJobRoom):
+    await tsio.enter_room(sid, f"jobs:{data.job_name}")
+
+@tsio.on(LeaveJobRoom)
+async def handle_leave(sid: str, data: LeaveJobRoom):
+    await tsio.leave_room(sid, f"jobs:{data.job_name}")
+```
+
+### Emission Deduplication
+
+Internally, emissions are `Emission(NamedTuple)` pairs of `(event, room)`. Functions that modify state return `set[Emission]`, and callers emit **after commit**. Frozen models ensure duplicate events (e.g., multiple workers disconnecting from the same job) are deduplicated automatically.
+
 ## Background Sweeper
 
 Host app starts explicitly:
 
 ```python
+from zndraw_joblib import run_sweeper, get_settings
+
 asyncio.create_task(
-    run_cleanup_sweeper(base_url=..., interval_seconds=30)
+    run_sweeper(get_session=my_session_factory, settings=get_settings(), tsio=tsio)
 )
 ```
 
 The sweeper:
 1. Finds workers with stale `last_heartbeat`
-2. Marks their `running` tasks as `FAILED`
+2. Marks their `running`/`claimed` tasks as `FAILED`
 3. Removes orphan jobs (no workers, no pending tasks)
+4. Emits `TaskStatusEvent` and `JobsInvalidate` events after each cleanup cycle
 
 ## Error Handling (RFC 9457)
 

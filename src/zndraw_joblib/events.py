@@ -48,6 +48,30 @@ class TaskStatusEvent(BaseModel):
     error: str | None = None
 
 
+class JoinJobRoom(BaseModel):
+    """Worker requests to join a job's notification room.
+
+    Sent by the client after REST job registration. The host app's
+    socketio handler should call ``tsio.enter_room(sid, f"jobs:{job_name}")``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    job_name: str
+
+
+class LeaveJobRoom(BaseModel):
+    """Worker requests to leave a job's notification room.
+
+    Sent by the client on graceful disconnect or job unregistration.
+    The host app's handler should call ``tsio.leave_room(sid, f"jobs:{job_name}")``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    job_name: str
+
+
 class Emission(NamedTuple):
     """Hashable (event, room) pair for set-based deduplication."""
 

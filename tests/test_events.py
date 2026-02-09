@@ -7,6 +7,8 @@ from zndraw_joblib.events import (
     JobsInvalidate,
     TaskAvailable,
     TaskStatusEvent,
+    JoinJobRoom,
+    LeaveJobRoom,
     Emission,
 )
 
@@ -52,6 +54,25 @@ def test_emission_dedup_jobs_invalidate():
         Emission(JobsInvalidate(), "room:test"),
     }
     assert len(emissions) == 2
+
+
+def test_join_job_room_frozen():
+    ev = JoinJobRoom(job_name="@global:modifiers:Rotate")
+    assert ev.job_name == "@global:modifiers:Rotate"
+    try:
+        ev.job_name = "x"
+        assert False, "Should have raised"
+    except Exception:
+        pass
+
+
+def test_leave_job_room_frozen():
+    ev = LeaveJobRoom(job_name="@global:modifiers:Rotate")
+    assert ev.job_name == "@global:modifiers:Rotate"
+    a = LeaveJobRoom(job_name="@global:modifiers:Rotate")
+    b = LeaveJobRoom(job_name="@global:modifiers:Rotate")
+    assert a == b
+    assert hash(a) == hash(b)
 
 
 def test_emission_dedup_task_status():
