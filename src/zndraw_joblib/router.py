@@ -18,6 +18,13 @@ from zndraw_joblib.dependencies import (
     get_locked_async_session,
     get_session_factory,
     get_internal_registry,
+    get_tsio,
+)
+from zndraw_joblib.events import (
+    Emission,
+    JobsInvalidate,
+    TaskAvailable,
+    TaskStatusEvent,
 )
 from zndraw_joblib.registry import InternalRegistry
 from zndraw_joblib.exceptions import (
@@ -63,6 +70,7 @@ LockedSessionDep = Annotated[AsyncSession, Depends(get_locked_async_session)]
 SettingsDep = Annotated[JobLibSettings, Depends(get_settings)]
 SessionFactoryDep = Annotated[object, Depends(get_session_factory)]
 InternalRegistryDep = Annotated[InternalRegistry | None, Depends(get_internal_registry)]
+TsioDep = Annotated[object | None, Depends(get_tsio)]
 
 # Valid status transitions
 VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
@@ -180,6 +188,35 @@ async def _bulk_task_responses(
     ]
 
 
+async def _task_status_emission(session: AsyncSession, task: Task) -> Emission:
+    """Build a TaskStatusEvent emission from a task."""
+    result = await session.execute(select(Job).where(Job.id == task.job_id))
+    job = result.scalar_one_or_none()
+    return Emission(
+        TaskStatusEvent(
+            id=str(task.id),
+            name=job.full_name if job else "",
+            room_id=task.room_id,
+            status=task.status,
+            created_at=task.created_at,
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+            queue_position=await _queue_position(session, task),
+            worker_id=str(task.worker_id) if task.worker_id else None,
+            error=task.error,
+        ),
+        f"room:{task.room_id}",
+    )
+
+
+async def _emit(tsio: object | None, emissions: set[Emission]) -> None:
+    """Emit a set of events if tsio is available."""
+    if not tsio:
+        return
+    for emission in emissions:
+        await tsio.emit(emission.event, room=emission.room)
+
+
 router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
 
 
@@ -224,6 +261,7 @@ async def register_job(
     session: LockedSessionDep,
     user: CurrentUserDep,
     settings: SettingsDep,
+    tsio: TsioDep,
 ):
     """Register a job for a room. Creates worker and link if not exists."""
     # Validate room_id
@@ -309,6 +347,7 @@ async def register_job(
         session.add(link)
 
     await session.commit()
+    await _emit(tsio, {Emission(JobsInvalidate(), f"room:{room_id}")})
     await session.refresh(job)
 
     # Get worker IDs for this job
@@ -548,6 +587,7 @@ async def submit_task(
     session: LockedSessionDep,
     user: CurrentUserDep,
     internal_registry: InternalRegistryDep,
+    tsio: TsioDep,
 ):
     """Submit a task for processing."""
     validate_room_id(room_id)
@@ -565,6 +605,21 @@ async def submit_task(
     session.add(task)
     await session.commit()
     await session.refresh(task)
+
+    # Emit events
+    emissions: set[Emission] = {await _task_status_emission(session, task)}
+    if job.room_id != "@internal":
+        emissions.add(
+            Emission(
+                TaskAvailable(
+                    job_name=job.full_name,
+                    room_id=room_id,
+                    task_id=str(task.id),
+                ),
+                f"jobs:{job.full_name}",
+            )
+        )
+    await _emit(tsio, emissions)
 
     # Dispatch to taskiq for @internal jobs
     if job.room_id == "@internal":
@@ -592,6 +647,7 @@ async def claim_task(
     session: LockedSessionDep,
     user: CurrentUserDep,
     settings: SettingsDep,
+    tsio: TsioDep,
 ):
     """Claim the oldest pending task for jobs the specified worker is registered for."""
     # Validate that worker_id exists and belongs to the authenticated user
@@ -666,6 +722,8 @@ async def claim_task(
     result = await session.execute(select(Task).where(Task.id == claimed_task_id))
     task = result.scalar_one()
 
+    await _emit(tsio, {await _task_status_emission(session, task)})
+
     return TaskClaimResponse(task=await _task_response(session, task))
 
 
@@ -718,6 +776,7 @@ async def update_task_status(
     request: TaskUpdateRequest,
     session: LockedSessionDep,
     user: CurrentUserDep,
+    tsio: TsioDep,
 ):
     """Update task status. Requires the task's worker owner or superuser."""
     result = await session.execute(select(Task).where(Task.id == task_id))
@@ -757,10 +816,13 @@ async def update_task_status(
     await session.commit()
     await session.refresh(task)
 
-    # Soft-delete orphan job if task reached terminal state
+    # Build emissions and handle orphan job cleanup
+    emissions: set[Emission] = {await _task_status_emission(session, task)}
     if request.status in TERMINAL_STATUSES:
-        await _soft_delete_orphan_job(session, task.job_id)
+        orphan_emissions = await _soft_delete_orphan_job(session, task.job_id)
+        emissions |= orphan_emissions
         await session.commit()
+    await _emit(tsio, emissions)
 
     return await _task_response(session, task)
 
@@ -821,6 +883,7 @@ async def delete_worker(
     worker_id: UUID,
     session: LockedSessionDep,
     user: CurrentUserDep,
+    tsio: TsioDep,
 ):
     """Delete worker, fail their tasks, remove job links, and clean up orphan jobs.
 
@@ -834,5 +897,6 @@ async def delete_worker(
     if worker.user_id != user.id and not user.is_superuser:
         raise Forbidden.exception(detail="Worker belongs to different user")
 
-    await _cleanup_worker(session, worker)
+    emissions = await _cleanup_worker(session, worker)
     await session.commit()
+    await _emit(tsio, emissions)
