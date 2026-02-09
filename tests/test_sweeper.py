@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
+from zndraw_joblib.events import JobsInvalidate, TaskStatusEvent
 from zndraw_joblib.models import Worker, Job, Task, TaskStatus, WorkerJobLink
 from zndraw_joblib.sweeper import (
     cleanup_stale_workers,
@@ -31,7 +32,7 @@ async def test_cleanup_stale_workers_finds_stale(async_session_factory, test_use
 
     # Run cleanup with 60 second timeout
     async with async_session_factory() as session:
-        count = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 1
 
     # Verify worker was deleted
@@ -60,7 +61,7 @@ async def test_cleanup_stale_workers_ignores_alive(async_session_factory, test_u
 
     # Run cleanup with 60 second timeout
     async with async_session_factory() as session:
-        count = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 0
 
     # Verify worker still exists
@@ -122,7 +123,7 @@ async def test_cleanup_fails_running_tasks(async_session_factory, test_user_id):
 
     # Run cleanup
     async with async_session_factory() as session:
-        count = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 1
 
     # Verify CLAIMED and RUNNING tasks are failed, PENDING is unchanged
@@ -181,7 +182,7 @@ async def test_cleanup_soft_deletes_orphan_jobs(async_session_factory, test_user
 
     # Run cleanup
     async with async_session_factory() as session:
-        count = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 1
 
     # Verify job is soft-deleted
@@ -229,7 +230,7 @@ async def test_cleanup_keeps_job_with_pending_tasks(
 
     # Run cleanup
     async with async_session_factory() as session:
-        count = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 1
 
     # Verify job is NOT soft-deleted because it has a pending task
@@ -262,7 +263,7 @@ async def test_cleanup_multiple_stale_workers(async_session_factory, test_user_i
 
     # Run cleanup
     async with async_session_factory() as session:
-        count = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 3
 
     # Verify only alive worker remains
@@ -342,7 +343,7 @@ async def test_cleanup_job_keeps_other_workers(async_session_factory, test_user_
 
     # Run cleanup
     async with async_session_factory() as session:
-        count = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 1
 
     # Verify job is NOT soft-deleted because alive-worker is still linked
@@ -379,7 +380,9 @@ async def test_cleanup_stuck_internal_tasks(async_session_factory):
         task_id = task.id
 
     async with async_session_factory() as session:
-        count = await cleanup_stuck_internal_tasks(session, timeout=timedelta(hours=1))
+        count, _ = await cleanup_stuck_internal_tasks(
+            session, timeout=timedelta(hours=1)
+        )
         assert count == 1
 
     async with async_session_factory() as session:
@@ -408,7 +411,9 @@ async def test_cleanup_stuck_internal_tasks_skips_recent(async_session_factory):
         await session.commit()
 
     async with async_session_factory() as session:
-        count = await cleanup_stuck_internal_tasks(session, timeout=timedelta(hours=1))
+        count, _ = await cleanup_stuck_internal_tasks(
+            session, timeout=timedelta(hours=1)
+        )
         assert count == 0
 
 
@@ -430,5 +435,103 @@ async def test_cleanup_stuck_skips_external_tasks(async_session_factory):
         await session.commit()
 
     async with async_session_factory() as session:
-        count = await cleanup_stuck_internal_tasks(session, timeout=timedelta(hours=1))
+        count, _ = await cleanup_stuck_internal_tasks(
+            session, timeout=timedelta(hours=1)
+        )
         assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_worker_returns_task_status_emissions(
+    async_session_factory, test_user_id
+):
+    """_cleanup_worker should return TaskStatusEvent emissions for failed tasks."""
+    worker_id = uuid.uuid4()
+
+    async with async_session_factory() as session:
+        worker = Worker(
+            id=worker_id,
+            user_id=test_user_id,
+            last_heartbeat=datetime.now(timezone.utc),
+        )
+        session.add(worker)
+        job = Job(room_id="@global", category="modifiers", name="EmitTest", schema_={})
+        session.add(job)
+        await session.flush()
+        link = WorkerJobLink(worker_id=worker_id, job_id=job.id)
+        session.add(link)
+        task = Task(
+            job_id=job.id,
+            room_id="room1",
+            status=TaskStatus.RUNNING,
+            worker_id=worker_id,
+        )
+        session.add(task)
+        await session.commit()
+        task_id = task.id
+
+    async with async_session_factory() as session:
+        result = await session.execute(select(Worker).where(Worker.id == worker_id))
+        worker = result.scalar_one()
+        emissions = await _cleanup_worker(session, worker)
+        await session.commit()
+
+    # Should have TaskStatusEvent for the failed task + JobsInvalidate for orphan job
+    task_events = [e for e in emissions if isinstance(e.event, TaskStatusEvent)]
+    job_events = [e for e in emissions if isinstance(e.event, JobsInvalidate)]
+    assert len(task_events) == 1
+    assert task_events[0].event.id == str(task_id)
+    assert task_events[0].event.status == "failed"
+    assert task_events[0].room == "room:room1"
+    assert len(job_events) == 1
+    assert job_events[0].room == "room:@global"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_workers_returns_emissions(
+    async_session_factory, test_user_id
+):
+    """cleanup_stale_workers should return count and emissions."""
+    worker_id = uuid.uuid4()
+
+    async with async_session_factory() as session:
+        stale_time = datetime.now(timezone.utc) - timedelta(minutes=2)
+        worker = Worker(id=worker_id, user_id=test_user_id, last_heartbeat=stale_time)
+        session.add(worker)
+        await session.commit()
+
+    async with async_session_factory() as session:
+        count, emissions = await cleanup_stale_workers(session, timedelta(seconds=60))
+        assert count == 1
+        assert isinstance(emissions, set)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stuck_internal_returns_emissions(async_session_factory):
+    """cleanup_stuck_internal_tasks should return count and emissions."""
+    async with async_session_factory() as session:
+        job = Job(
+            room_id="@internal", category="modifiers", name="EmitInternal", schema_={}
+        )
+        session.add(job)
+        await session.flush()
+        task = Task(
+            job_id=job.id,
+            room_id="test-room",
+            status=TaskStatus.RUNNING,
+            started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        session.add(task)
+        await session.commit()
+        task_id = task.id
+
+    async with async_session_factory() as session:
+        count, emissions = await cleanup_stuck_internal_tasks(
+            session, timeout=timedelta(hours=1)
+        )
+        assert count == 1
+        task_events = [e for e in emissions if isinstance(e.event, TaskStatusEvent)]
+        assert len(task_events) == 1
+        assert task_events[0].event.id == str(task_id)
+        assert task_events[0].event.status == "failed"
+        assert task_events[0].room == "room:test-room"
