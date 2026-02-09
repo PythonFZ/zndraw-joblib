@@ -11,30 +11,34 @@ from datetime import datetime
 from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
+from zndraw_socketio import AsyncServerWrapper
 
-from zndraw_joblib.models import TaskStatus
+from zndraw_joblib.models import Task, TaskStatus
 
 
-class JobsInvalidate(BaseModel):
+class FrozenEvent(BaseModel):
+    """Base class for all frozen event models.
+
+    Provides frozen=True config for hashability, required by Emission sets.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+
+class JobsInvalidate(FrozenEvent):
     """Frontend should refetch the job list."""
 
-    model_config = ConfigDict(frozen=True)
 
-
-class TaskAvailable(BaseModel):
+class TaskAvailable(FrozenEvent):
     """A new task is available for claiming."""
-
-    model_config = ConfigDict(frozen=True)
 
     job_name: str
     room_id: str
     task_id: str
 
 
-class TaskStatusEvent(BaseModel):
+class TaskStatusEvent(FrozenEvent):
     """A task's status changed."""
-
-    model_config = ConfigDict(frozen=True)
 
     id: str
     name: str
@@ -48,32 +52,66 @@ class TaskStatusEvent(BaseModel):
     error: str | None = None
 
 
-class JoinJobRoom(BaseModel):
+class JoinJobRoom(FrozenEvent):
     """Worker requests to join a job's notification room.
 
     Sent by the client after REST job registration. The host app's
-    socketio handler should call ``tsio.enter_room(sid, f"jobs:{job_name}")``.
+    socketio handler should call ``tsio.enter_room(sid, f"jobs:{job_name}")``
+    and store the ``worker_id`` in the SIO session for disconnect cleanup.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     job_name: str
+    worker_id: str
 
 
-class LeaveJobRoom(BaseModel):
+class LeaveJobRoom(FrozenEvent):
     """Worker requests to leave a job's notification room.
 
     Sent by the client on graceful disconnect or job unregistration.
     The host app's handler should call ``tsio.leave_room(sid, f"jobs:{job_name}")``.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     job_name: str
+    worker_id: str
 
 
 class Emission(NamedTuple):
     """Hashable (event, room) pair for set-based deduplication."""
 
-    event: BaseModel
+    event: FrozenEvent
     room: str
+
+
+def build_task_status_emission(
+    task: Task,
+    job_full_name: str,
+    queue_position: int | None = None,
+) -> Emission:
+    """Build a TaskStatusEvent emission from task data."""
+    return Emission(
+        TaskStatusEvent(
+            id=str(task.id),
+            name=job_full_name,
+            room_id=task.room_id,
+            status=task.status,
+            created_at=task.created_at,
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+            queue_position=queue_position,
+            worker_id=str(task.worker_id) if task.worker_id else None,
+            error=task.error,
+        ),
+        f"room:{task.room_id}",
+    )
+
+
+async def emit(tsio: AsyncServerWrapper | None, emissions: set[Emission]) -> None:
+    """Emit a set of events via the Socket.IO server wrapper.
+
+    Uses the zndraw-socketio API (passing Pydantic models directly).
+    No-op if tsio is None.
+    """
+    if not tsio:
+        return
+    for emission in emissions:
+        await tsio.emit(emission.event, room=emission.room)
