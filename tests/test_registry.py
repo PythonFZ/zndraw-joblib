@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy import select
 
-from zndraw_joblib.client import Extension, Category
+from zndraw_joblib.client import Category, Extension
 from zndraw_joblib.models import Job
 from zndraw_joblib.registry import (
     InternalRegistry,

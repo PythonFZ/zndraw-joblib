@@ -9,12 +9,12 @@ import pytest
 from sqlalchemy import select
 
 from zndraw_joblib.events import JobsInvalidate, TaskStatusEvent
-from zndraw_joblib.models import Worker, Job, Task, TaskStatus, WorkerJobLink
+from zndraw_joblib.models import Job, Task, TaskStatus, Worker, WorkerJobLink
 from zndraw_joblib.settings import JobLibSettings
 from zndraw_joblib.sweeper import (
     cleanup_stale_workers,
-    cleanup_worker,
     cleanup_stuck_internal_tasks,
+    cleanup_worker,
     run_sweeper,
 )
 

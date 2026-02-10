@@ -1,28 +1,26 @@
 # src/zndraw_joblib/router.py
 import asyncio
-import random
 import logging
+import random
 import re
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 from zndraw_auth import User, current_active_user, current_superuser
-
-from zndraw_joblib.dependencies import (
-    get_settings,
-    get_locked_async_session,
-    get_session_factory,
-    get_internal_registry,
-    get_tsio,
-)
+from zndraw_auth.db import SessionDep, get_session_maker
 from zndraw_socketio import AsyncServerWrapper
 
+from zndraw_joblib.dependencies import (
+    get_internal_registry,
+    get_settings,
+    get_tsio,
+)
 from zndraw_joblib.events import (
     Emission,
     JobsInvalidate,
@@ -30,50 +28,51 @@ from zndraw_joblib.events import (
     build_task_status_emission,
     emit,
 )
-from zndraw_joblib.registry import InternalRegistry
 from zndraw_joblib.exceptions import (
+    Forbidden,
+    InternalJobNotConfigured,
     InvalidCategory,
     InvalidRoomId,
-    SchemaConflict,
-    Forbidden,
-    JobNotFound,
-    WorkerNotFound,
-    TaskNotFound,
     InvalidTaskTransition,
-    InternalJobNotConfigured,
+    JobNotFound,
+    SchemaConflict,
+    TaskNotFound,
+    WorkerNotFound,
 )
 from zndraw_joblib.models import (
+    TERMINAL_STATUSES,
     Job,
-    Worker,
-    WorkerJobLink,
     Task,
     TaskStatus,
-    TERMINAL_STATUSES,
+    Worker,
+    WorkerJobLink,
 )
-from zndraw_joblib.sweeper import cleanup_worker, _soft_delete_orphan_job
+from zndraw_joblib.registry import InternalRegistry
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
     JobResponse,
     JobSummary,
-    TaskSubmitRequest,
-    TaskResponse,
+    PaginatedResponse,
     TaskClaimRequest,
     TaskClaimResponse,
+    TaskResponse,
+    TaskSubmitRequest,
     TaskUpdateRequest,
-    WorkerSummary,
     WorkerResponse,
-    PaginatedResponse,
+    WorkerSummary,
 )
 from zndraw_joblib.settings import JobLibSettings
+from zndraw_joblib.sweeper import _soft_delete_orphan_job, cleanup_worker
 
 logger = logging.getLogger(__name__)
 
 # Type aliases for dependency injection
 CurrentUserDep = Annotated[User, Depends(current_active_user)]
 SuperUserDep = Annotated[User, Depends(current_superuser)]
-LockedSessionDep = Annotated[AsyncSession, Depends(get_locked_async_session)]
 SettingsDep = Annotated[JobLibSettings, Depends(get_settings)]
-SessionFactoryDep = Annotated[object, Depends(get_session_factory)]
+SessionMakerDep = Annotated[
+    async_sessionmaker[AsyncSession], Depends(get_session_maker)
+]
 InternalRegistryDep = Annotated[InternalRegistry | None, Depends(get_internal_registry)]
 TsioDep = Annotated[AsyncServerWrapper | None, Depends(get_tsio)]
 
@@ -239,7 +238,7 @@ def validate_room_id(room_id: str) -> None:
     "/workers", response_model=WorkerResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_worker(
-    session: LockedSessionDep,
+    session: SessionDep,
     user: CurrentUserDep,
 ):
     """Create a new worker for the authenticated user.
@@ -263,7 +262,7 @@ async def register_job(
     room_id: str,
     request: JobRegisterRequest,
     response: Response,
-    session: LockedSessionDep,
+    session: SessionDep,
     user: CurrentUserDep,
     settings: SettingsDep,
     tsio: TsioDep,
@@ -377,7 +376,7 @@ async def register_job(
 @router.get("/rooms/{room_id}/jobs", response_model=PaginatedResponse[JobSummary])
 async def list_jobs(
     room_id: str,
-    session: LockedSessionDep,
+    session: SessionDep,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -413,7 +412,7 @@ async def list_jobs(
 @router.get("/rooms/{room_id}/workers", response_model=PaginatedResponse[WorkerSummary])
 async def list_workers_for_room(
     room_id: str,
-    session: LockedSessionDep,
+    session: SessionDep,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -465,7 +464,7 @@ async def list_workers_for_room(
 @router.get("/rooms/{room_id}/tasks", response_model=PaginatedResponse[TaskResponse])
 async def list_tasks_for_room(
     room_id: str,
-    session: LockedSessionDep,
+    session: SessionDep,
     task_status: TaskStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -503,7 +502,7 @@ async def list_tasks_for_room(
 async def list_tasks_for_job(
     room_id: str,
     job_name: str,
-    session: LockedSessionDep,
+    session: SessionDep,
     task_status: TaskStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -540,7 +539,7 @@ async def list_tasks_for_job(
 async def get_job(
     room_id: str,
     job_name: str,
-    session: LockedSessionDep,
+    session: SessionDep,
 ):
     """Get job details by full name."""
     validate_room_id(room_id)
@@ -574,7 +573,8 @@ async def submit_task(
     job_name: str,
     request: TaskSubmitRequest,
     response: Response,
-    session: LockedSessionDep,
+    http_request: Request,
+    session: SessionDep,
     user: CurrentUserDep,
     internal_registry: InternalRegistryDep,
     tsio: TsioDep,
@@ -610,7 +610,7 @@ async def submit_task(
                 task_id=str(task.id),
                 room_id=room_id,
                 payload=request.payload,
-                base_url="",
+                base_url=str(http_request.base_url).rstrip("/"),
             )
         except Exception:
             task.status = TaskStatus.FAILED
@@ -619,6 +619,10 @@ async def submit_task(
             await session.commit()
             await session.refresh(task)
             return await _task_response(session, task)
+        # Server implicitly claims the task for internal execution
+        task.status = TaskStatus.CLAIMED
+        await session.commit()
+        await session.refresh(task)
 
     # Emit events (after successful dispatch for @internal)
     emissions: set[Emission] = {await _task_status_emission(session, task)}
@@ -645,7 +649,7 @@ async def submit_task(
 @router.post("/tasks/claim", response_model=TaskClaimResponse)
 async def claim_task(
     request: TaskClaimRequest,
-    session: LockedSessionDep,
+    session: SessionDep,
     user: CurrentUserDep,
     settings: SettingsDep,
     tsio: TsioDep,
@@ -742,13 +746,13 @@ async def claim_task(
 async def get_task_status(
     task_id: UUID,
     response: Response,
-    session_factory: SessionFactoryDep,
+    session_maker: SessionMakerDep,
     settings: SettingsDep,
     prefer: str | None = Header(None),
 ):
     """Get task status. Supports long-polling via Prefer: wait=N header."""
     # Initial lookup
-    async with session_factory() as session:
+    async with session_maker() as session:
         result = await session.execute(select(Task).where(Task.id == task_id))
         task = result.scalar_one_or_none()
         if not task:
@@ -769,7 +773,7 @@ async def get_task_status(
                 poll_interval * 1.5, 5.0
             )  # Exponential backoff, cap at 5s
 
-            async with session_factory() as session:
+            async with session_maker() as session:
                 result = await session.execute(select(Task).where(Task.id == task_id))
                 task = result.scalar_one_or_none()
                 if not task:
@@ -778,7 +782,7 @@ async def get_task_status(
         response.headers["Preference-Applied"] = f"wait={int(effective_wait)}"
 
     # Build final response — re-fetch to avoid stale detached object
-    async with session_factory() as session:
+    async with session_maker() as session:
         result = await session.execute(select(Task).where(Task.id == task_id))
         task = result.scalar_one()
         return await _task_response(session, task)
@@ -788,7 +792,7 @@ async def get_task_status(
 async def update_task_status(
     task_id: UUID,
     request: TaskUpdateRequest,
-    session: LockedSessionDep,
+    session: SessionDep,
     user: CurrentUserDep,
     tsio: TsioDep,
 ):
@@ -845,7 +849,7 @@ async def update_task_status(
 
 @router.get("/workers", response_model=PaginatedResponse[WorkerSummary])
 async def list_workers(
-    session: LockedSessionDep,
+    session: SessionDep,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -874,7 +878,7 @@ async def list_workers(
 @router.patch("/workers/{worker_id}", response_model=WorkerResponse)
 async def worker_heartbeat(
     worker_id: UUID,
-    session: LockedSessionDep,
+    session: SessionDep,
     user: CurrentUserDep,
 ):
     """Update worker heartbeat. Worker must belong to authenticated user."""
@@ -897,7 +901,7 @@ async def worker_heartbeat(
 @router.delete("/workers/{worker_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_worker(
     worker_id: UUID,
-    session: LockedSessionDep,
+    session: SessionDep,
     user: CurrentUserDep,
     tsio: TsioDep,
 ):

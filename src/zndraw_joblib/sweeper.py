@@ -10,7 +10,6 @@ from typing import AsyncGenerator, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-
 from zndraw_socketio import AsyncServerWrapper
 
 from zndraw_joblib.events import (
@@ -35,10 +34,21 @@ logger = logging.getLogger(__name__)
 async def _soft_delete_orphan_job(
     session: AsyncSession, job_id: uuid.UUID
 ) -> set[Emission]:
-    """Soft-delete a job if it has no workers and no non-terminal tasks.
+    """Soft-delete a job with no workers and no pending tasks.
 
+    Only soft-deletes if:
+    - Job has no workers
+    - Job has no pending tasks (new workers could register and pick them up)
+
+    Skips @internal jobs since they are server-managed and always available.
     Note: Does NOT commit the transaction - caller must commit.
     """
+    # @internal jobs are never orphaned — they're registered at startup
+    result = await session.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job or job.room_id == "@internal":
+        return set()
+
     # Check if job has any remaining workers
     result = await session.execute(
         select(WorkerJobLink).where(WorkerJobLink.job_id == job_id).limit(1)
@@ -46,27 +56,25 @@ async def _soft_delete_orphan_job(
     if result.scalar_one_or_none():
         return set()  # Job still has workers
 
-    # Check if job has any non-terminal tasks
+    # Check if job has any pending tasks (new workers could register and pick them up)
     result = await session.execute(
         select(Task)
         .where(
             Task.job_id == job_id,
-            Task.status.not_in(TERMINAL_STATUSES),
+            Task.status == TaskStatus.PENDING,
         )
         .limit(1)
     )
     if result.scalar_one_or_none():
-        return set()  # Job has pending/running tasks
+        return set()  # Job has pending tasks, keep it alive
 
-    # Job is orphan - soft delete (tasks remain as historical records)
-    result = await session.execute(select(Job).where(Job.id == job_id))
-    job = result.scalar_one_or_none()
-    if job:
-        job.deleted = True
-        session.add(job)
-        return {Emission(JobsInvalidate(), f"room:{job.room_id}")}
+    emissions: set[Emission] = set()
 
-    return set()
+    # Soft-delete the orphaned job (no workers, no pending tasks)
+    job.deleted = True
+    session.add(job)
+    emissions.add(Emission(JobsInvalidate(), f"room:{job.room_id}"))
+    return emissions
 
 
 async def cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission]:

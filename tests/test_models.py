@@ -3,10 +3,10 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from zndraw_joblib.models import (
-    TaskStatus,
     Job,
-    Worker,
     Task,
+    TaskStatus,
+    Worker,
 )
 
 

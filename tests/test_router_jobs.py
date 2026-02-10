@@ -2,8 +2,9 @@
 """Tests for job registration endpoint using shared fixtures from conftest.py."""
 
 from uuid import UUID
-from zndraw_joblib.schemas import JobResponse, JobSummary, PaginatedResponse
+
 from zndraw_joblib.exceptions import ProblemDetail
+from zndraw_joblib.schemas import JobResponse, JobSummary, PaginatedResponse
 
 
 def test_register_job_global(client):
@@ -235,6 +236,7 @@ def test_resolve_internal_job_from_room(client):
 def test_submit_task_for_internal_job_from_room(seeded_client):
     """@internal jobs can be submitted from any room via _resolve_job."""
     from unittest.mock import AsyncMock, MagicMock
+
     from zndraw_joblib.registry import InternalRegistry
 
     # Register an @internal job

@@ -17,8 +17,8 @@ from zndraw_joblib.events import JoinJobRoom, LeaveJobRoom
 from zndraw_joblib.models import TaskStatus
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
-    TaskSubmitRequest,
     TaskClaimResponse,
+    TaskSubmitRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,8 @@ class ApiManager(Protocol):
 
     @property
     def base_url(self) -> str: ...
+
+    def raise_for_status(self, response: httpx.Response) -> None: ...
 
 
 class ClaimedTask(Generic[E]):
@@ -122,7 +124,7 @@ class JobManager:
                 f"{self.api.base_url}/v1/joblib/workers/{self._worker_id}",
                 headers=self.api.get_headers(),
             )
-            resp.raise_for_status()
+            self.api.raise_for_status(resp)
 
         self._registry.clear()
         self._worker_id = None
@@ -142,7 +144,7 @@ class JobManager:
             f"{self.api.base_url}/v1/joblib/workers",
             headers=self.api.get_headers(),
         )
-        response.raise_for_status()
+        self.api.raise_for_status(response)
         self._worker_id = UUID(response.json()["id"])
         return self._worker_id
 
@@ -196,7 +198,7 @@ class JobManager:
             headers=self.api.get_headers(),
             json=request.model_dump(exclude_none=True, mode="json"),
         )
-        resp.raise_for_status()
+        self.api.raise_for_status(resp)
 
         data = resp.json()
         full_name = f"{room_id}:{category}:{name}"
@@ -233,7 +235,7 @@ class JobManager:
             headers=self.api.get_headers(),
             json={"worker_id": str(self._worker_id)},
         )
-        response.raise_for_status()
+        self.api.raise_for_status(response)
         claim_response = TaskClaimResponse.model_validate(response.json())
 
         if claim_response.task is None:
@@ -286,7 +288,7 @@ class JobManager:
             headers=self.api.get_headers(),
             json=body,
         )
-        response.raise_for_status()
+        self.api.raise_for_status(response)
 
     def start(self, task: ClaimedTask) -> None:
         """Transition a claimed task to RUNNING."""
@@ -314,7 +316,7 @@ class JobManager:
             f"{self.api.base_url}/v1/joblib/workers/{self._worker_id}",
             headers=self.api.get_headers(),
         )
-        response.raise_for_status()
+        self.api.raise_for_status(response)
 
     def submit(
         self, extension: Extension, room: str, *, job_room: str = "@global"
@@ -342,5 +344,5 @@ class JobManager:
             headers=self.api.get_headers(),
             json=request.model_dump(),
         )
-        response.raise_for_status()
+        self.api.raise_for_status(response)
         return response.json()["id"]

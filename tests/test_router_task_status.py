@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import pytest
 
-from zndraw_joblib.schemas import TaskResponse, TaskClaimResponse, PaginatedResponse
 from zndraw_joblib.exceptions import ProblemDetail
+from zndraw_joblib.schemas import PaginatedResponse, TaskClaimResponse, TaskResponse
 
 
 @pytest.fixture

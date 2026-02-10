@@ -3,8 +3,8 @@
 
 import pytest
 
-from zndraw_joblib.schemas import JobSummary, JobResponse, PaginatedResponse
 from zndraw_joblib.exceptions import ProblemDetail
+from zndraw_joblib.schemas import JobResponse, JobSummary, PaginatedResponse
 
 
 @pytest.fixture

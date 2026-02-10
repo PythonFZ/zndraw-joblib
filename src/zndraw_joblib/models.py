@@ -5,16 +5,16 @@ from typing import Any, Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
-    Index,
-    UniqueConstraint,
-    ForeignKey,
-    String,
     Boolean,
     DateTime,
+    ForeignKey,
+    Index,
+    String,
     Text,
+    UniqueConstraint,
 )
-from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 from zndraw_auth import Base
 
 

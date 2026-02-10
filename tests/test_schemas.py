@@ -2,15 +2,15 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
+from zndraw_joblib.models import TaskStatus
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
     JobResponse,
-    TaskSubmitRequest,
-    TaskResponse,
     TaskClaimResponse,
+    TaskResponse,
+    TaskSubmitRequest,
     TaskUpdateRequest,
 )
-from zndraw_joblib.models import TaskStatus
 
 
 def test_job_register_request():

@@ -6,38 +6,32 @@ A self-contained FastAPI package for distributed job/task management with SQL pe
 
 ```python
 # main.py
-import asyncio
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-
 from zndraw_auth import current_active_user, current_superuser
+from zndraw_auth.db import get_session_maker
 from zndraw_joblib.router import router
-from zndraw_joblib.dependencies import get_async_session_maker
 from zndraw_joblib.exceptions import ProblemException, problem_exception_handler
 from zndraw_joblib.sweeper import run_sweeper
 from zndraw_joblib.settings import JobLibSettings
 
-# 1. Your database engine + session maker
-engine = create_async_engine("sqlite+aiosqlite:///./app.db")
-my_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
 app = FastAPI()
 
-# 2. Override the single session maker dependency
-#    This drives ALL database access (locked sessions, session factory, long-polling)
-app.dependency_overrides[get_async_session_maker] = lambda: my_session_maker
+# 1. Override session maker dependency at auth level
+#    All database access (from auth and joblib) flows through this
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+engine = create_async_engine("sqlite+aiosqlite:///./app.db")
+my_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+app.dependency_overrides[get_session_maker] = lambda: my_session_maker
 
-# 3. Override auth dependencies (from zndraw_auth)
+# 2. Override auth dependencies (from zndraw_auth)
 # app.dependency_overrides[current_active_user] = my_get_current_user
 # app.dependency_overrides[current_superuser] = my_get_superuser
 
-# 4. Register exception handler and router
+# 3. Register exception handler and router
 app.add_exception_handler(ProblemException, problem_exception_handler)
 app.include_router(router)
 
-# 5. Initialize db lock and start background sweeper
-app.state.db_lock = asyncio.Lock()
-
+# 4. Start background sweeper
 async def get_session():
     async with my_session_maker() as session:
         yield session
@@ -48,21 +42,23 @@ settings = JobLibSettings()
 
 ### Dependency Architecture
 
-All database access flows through a single `get_async_session_maker` dependency:
+All database access flows through `zndraw_auth.db.get_session_maker`:
 
 ```
-get_async_session_maker  ← override this one dependency
-  ├─ get_locked_async_session  (adds optional SQLite lock, used by write endpoints)
-  └─ get_session_factory       (creates short-lived sessions for long-polling)
+get_session_maker (from zndraw_auth)  ← override this one dependency
+  ├─ SessionDep (regular endpoints)
+  └─ SessionMakerDep (long-polling endpoints)
 ```
 
 | Dependency | Override? | Purpose |
 |------------|-----------|---------|
-| `get_async_session_maker` | **Yes** | Single source of truth for all DB sessions |
+| `get_session_maker` | **Yes** | Single source of truth for all DB sessions (from zndraw_auth) |
 | `current_active_user` | Yes (from zndraw_auth) | Authenticated user identity |
 | `current_superuser` | Yes (from zndraw_auth) | Superuser access control |
 | `get_tsio` | Optional | Socket.IO server for real-time events |
 | `get_settings` | Optional | Override `JobLibSettings` defaults |
+
+**Note**: SQLite locking is handled by the host application (zndraw-fastapi). For SQLite databases, wrap the session maker with a lock in your app's lifespan context.
 
 ## Configuration
 

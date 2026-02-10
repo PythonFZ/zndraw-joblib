@@ -3,9 +3,9 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-from zndraw_joblib.schemas import TaskResponse
 from zndraw_joblib.exceptions import ProblemDetail
 from zndraw_joblib.registry import InternalRegistry
+from zndraw_joblib.schemas import TaskResponse
 
 
 def test_submit_task(seeded_client):

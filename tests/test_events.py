@@ -7,12 +7,12 @@ import pytest
 from pydantic import ValidationError
 
 from zndraw_joblib.events import (
+    Emission,
     JobsInvalidate,
-    TaskAvailable,
-    TaskStatusEvent,
     JoinJobRoom,
     LeaveJobRoom,
-    Emission,
+    TaskAvailable,
+    TaskStatusEvent,
 )
 
 

@@ -5,12 +5,12 @@
 def test_public_api_exports():
     """All public API should be importable from the main package."""
     from zndraw_joblib import (
-        # Router
-        router,
+        Category,
         # Models
         Job,
         JobManager,
-        Category,
+        # Router
+        router,
     )
 
     assert router is not None
@@ -70,12 +70,12 @@ def test_all_exports_in_dunder_all():
 
 def test_internal_registry_exports():
     from zndraw_joblib import (
+        InternalExecutor,
+        InternalJobNotConfigured,
+        InternalRegistry,
+        cleanup_stuck_internal_tasks,
         register_internal_jobs,
         register_internal_tasks,
-        InternalExecutor,
-        InternalRegistry,
-        InternalJobNotConfigured,
-        cleanup_stuck_internal_tasks,
     )
 
     assert callable(register_internal_jobs)

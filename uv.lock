@@ -1563,19 +1563,32 @@ wheels = [
 
 [[package]]
 name = "zndraw-auth"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.1"
+source = { editable = "../zndraw-auth" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "fastapi" },
     { name = "fastapi-users", extra = ["sqlalchemy"] },
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "sqlmodel" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/06/fb/dd7406c213e4c55e8dcbf2c10c0c030bb1a5df6d5fb43a9c20e3b41a65ba/zndraw_auth-0.1.0.tar.gz", hash = "sha256:704d106b68e3f7c9eb2bb6f988092f1f25afe5153c9ae29c203ce272baaf11e6", size = 5854, upload-time = "2026-02-03T18:29:07.873Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/c8/85e6569ac81ec9e05c7c9b08109455154a472263134135035dca3338bea7/zndraw_auth-0.1.0-py3-none-any.whl", hash = "sha256:a484e5df1a30eef23dc49107493a5d091d1b13da2220f87a89db2c150cb1219f", size = 7553, upload-time = "2026-02-03T18:29:09.322Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.19.0" },
+    { name = "fastapi", specifier = ">=0.128.0" },
+    { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=14.0.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
+    { name = "pydantic-settings", specifier = ">=2.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
+    { name = "sqlmodel", specifier = ">=0.0.22" },
 ]
+provides-extras = ["dev"]
 
 [[package]]
 name = "zndraw-joblib"
@@ -1610,7 +1623,7 @@ requires-dist = [
     { name = "sqlmodel", specifier = ">=0.0.31" },
     { name = "taskiq", specifier = ">=0.12.1" },
     { name = "taskiq-redis", specifier = ">=1.2.2" },
-    { name = "zndraw-auth" },
+    { name = "zndraw-auth", editable = "../zndraw-auth" },
     { name = "zndraw-socketio" },
 ]
 

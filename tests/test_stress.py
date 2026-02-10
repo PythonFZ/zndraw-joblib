@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from zndraw_joblib.schemas import TaskResponse, PaginatedResponse
+from zndraw_joblib.schemas import PaginatedResponse, TaskResponse
 
 
 @pytest.mark.asyncio

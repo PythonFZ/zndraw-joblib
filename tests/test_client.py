@@ -7,16 +7,16 @@ from unittest.mock import MagicMock
 import pytest
 
 from zndraw_joblib.client import (
-    JobManager,
-    Extension,
     Category,
+    Extension,
+    JobManager,
 )
 from zndraw_joblib.events import JoinJobRoom, LeaveJobRoom
 from zndraw_joblib.schemas import (
-    JobSummary,
     JobResponse,
-    TaskResponse,
+    JobSummary,
     PaginatedResponse,
+    TaskResponse,
 )
 
 
@@ -46,6 +46,11 @@ class MockClientApi:
 
     def get_headers(self) -> dict[str, str]:
         return {}
+
+    def raise_for_status(self, response) -> None:
+        """Raise HTTPError for 4xx/5xx responses."""
+        if response.status_code >= 400:
+            response.raise_for_status()
 
 
 def test_category_enum():

@@ -8,8 +8,6 @@ def test_default_settings():
     assert settings.worker_timeout_seconds == 60
     assert settings.sweeper_interval_seconds == 30
     assert settings.long_poll_max_wait_seconds == 60
-    assert settings.enable_db_lock is True
-    assert settings.db_lock_timeout_seconds == 30.0
     assert settings.internal_task_timeout_seconds == 3600
 
 
@@ -21,10 +19,10 @@ def test_settings_from_env(monkeypatch):
     assert settings.worker_timeout_seconds == 120
 
 
-def test_db_lock_settings_from_env(monkeypatch):
-    """Test that database lock settings can be configured via environment."""
-    monkeypatch.setenv("ZNDRAW_JOBLIB_ENABLE_DB_LOCK", "false")
-    monkeypatch.setenv("ZNDRAW_JOBLIB_DB_LOCK_TIMEOUT_SECONDS", "60.0")
+def test_claim_settings_from_env(monkeypatch):
+    """Test that claim retry settings can be configured via environment."""
+    monkeypatch.setenv("ZNDRAW_JOBLIB_CLAIM_MAX_ATTEMPTS", "20")
+    monkeypatch.setenv("ZNDRAW_JOBLIB_CLAIM_BASE_DELAY_SECONDS", "0.02")
     settings = JobLibSettings()
-    assert settings.enable_db_lock is False
-    assert settings.db_lock_timeout_seconds == 60.0
+    assert settings.claim_max_attempts == 20
+    assert settings.claim_base_delay_seconds == 0.02

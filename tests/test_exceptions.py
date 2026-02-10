@@ -1,12 +1,12 @@
 # tests/test_exceptions.py
 from zndraw_joblib.exceptions import (
-    ProblemException,
-    JobNotFound,
-    SchemaConflict,
     InvalidCategory,
-    WorkerNotFound,
-    TaskNotFound,
     InvalidTaskTransition,
+    JobNotFound,
+    ProblemException,
+    SchemaConflict,
+    TaskNotFound,
+    WorkerNotFound,
 )
 
 

@@ -4,14 +4,14 @@
 import time
 from uuid import UUID
 
+from zndraw_joblib.exceptions import ProblemDetail
 from zndraw_joblib.schemas import (
     JobResponse,
+    PaginatedResponse,
     TaskResponse,
     WorkerResponse,
     WorkerSummary,
-    PaginatedResponse,
 )
-from zndraw_joblib.exceptions import ProblemDetail
 
 
 def test_create_worker(client):
