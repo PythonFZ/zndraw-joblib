@@ -2,7 +2,7 @@
 """ZnDraw Job Management Library."""
 
 from zndraw_joblib.client import Category, ClaimedTask, Extension, JobManager
-from zndraw_joblib.dependencies import get_settings, get_tsio
+from zndraw_joblib.dependencies import JobLibSettingsDep, get_joblib_settings, get_tsio
 from zndraw_joblib.events import (
     Emission,
     FrozenEvent,
@@ -54,7 +54,8 @@ __all__ = [
     "WorkerJobLink",
     "TaskStatus",
     # Dependencies
-    "get_settings",
+    "get_joblib_settings",
+    "JobLibSettingsDep",
     "get_tsio",
     # Exceptions
     "ProblemException",

@@ -17,6 +17,7 @@ from zndraw_auth import Base, User
 
 from zndraw_joblib.exceptions import ProblemException, problem_exception_handler
 from zndraw_joblib.router import router
+from zndraw_joblib.settings import JobLibSettings
 
 # Configure pytest-asyncio
 pytest_plugins = ["pytest_asyncio"]
@@ -102,6 +103,7 @@ def _build_app(
     app.dependency_overrides[get_session_maker] = lambda: session_maker
     app.dependency_overrides[current_active_user] = current_user
     app.dependency_overrides[current_superuser] = current_user
+    app.state.joblib_settings = JobLibSettings()
     return app
 
 

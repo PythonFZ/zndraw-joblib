@@ -1,17 +1,19 @@
 # src/zndraw_joblib/dependencies.py
-from fastapi import Request
+from typing import Annotated
+
+from fastapi import Depends, Request
 from zndraw_socketio import AsyncServerWrapper
 
 from zndraw_joblib.registry import InternalRegistry
 from zndraw_joblib.settings import JobLibSettings
 
 
-def get_settings() -> JobLibSettings:
-    """Create a settings instance from environment variables.
+def get_joblib_settings(request: Request) -> JobLibSettings:
+    """Return joblib settings from app.state."""
+    return request.app.state.joblib_settings
 
-    Override this dependency in tests to inject custom settings.
-    """
-    return JobLibSettings()
+
+JobLibSettingsDep = Annotated[JobLibSettings, Depends(get_joblib_settings)]
 
 
 async def get_internal_registry(request: Request) -> InternalRegistry | None:
@@ -19,11 +21,10 @@ async def get_internal_registry(request: Request) -> InternalRegistry | None:
     return getattr(request.app.state, "internal_registry", None)
 
 
-async def get_tsio() -> AsyncServerWrapper | None:
-    """Return the Socket.IO server wrapper for emitting events.
+def get_tsio(request: Request) -> AsyncServerWrapper | None:
+    """Return the Socket.IO server wrapper from app.state.
 
-    Override this dependency in the host app to provide a real
-    zndraw-socketio AsyncServerWrapper. Returns None by default,
-    which disables all real-time event emissions.
+    Returns None if tsio is not configured, which disables
+    all real-time event emissions.
     """
-    return None
+    return getattr(request.app.state, "tsio", None)

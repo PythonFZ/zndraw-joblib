@@ -17,8 +17,8 @@ from zndraw_auth.db import SessionDep, get_session_maker
 from zndraw_socketio import AsyncServerWrapper
 
 from zndraw_joblib.dependencies import (
+    JobLibSettingsDep,
     get_internal_registry,
-    get_settings,
     get_tsio,
 )
 from zndraw_joblib.events import (
@@ -61,7 +61,6 @@ from zndraw_joblib.schemas import (
     WorkerResponse,
     WorkerSummary,
 )
-from zndraw_joblib.settings import JobLibSettings
 from zndraw_joblib.sweeper import _soft_delete_orphan_job, cleanup_worker
 
 logger = logging.getLogger(__name__)
@@ -69,7 +68,7 @@ logger = logging.getLogger(__name__)
 # Type aliases for dependency injection
 CurrentUserDep = Annotated[User, Depends(current_active_user)]
 SuperUserDep = Annotated[User, Depends(current_superuser)]
-SettingsDep = Annotated[JobLibSettings, Depends(get_settings)]
+SettingsDep = JobLibSettingsDep
 SessionMakerDep = Annotated[
     async_sessionmaker[AsyncSession], Depends(get_session_maker)
 ]

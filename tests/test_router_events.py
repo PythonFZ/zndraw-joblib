@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from zndraw_joblib.dependencies import get_tsio
 from zndraw_joblib.events import JobsInvalidate, TaskAvailable, TaskStatusEvent
 
 
@@ -20,8 +19,8 @@ def mock_tsio():
 
 @pytest.fixture
 def app_with_tsio(app, mock_tsio):
-    """App with tsio dependency overridden."""
-    app.dependency_overrides[get_tsio] = lambda: mock_tsio
+    """App with tsio set on app.state."""
+    app.state.tsio = mock_tsio
     return app
 
 
@@ -70,7 +69,6 @@ def test_submit_task_emits_task_available(client_with_tsio, mock_tsio):
 
 def test_submit_internal_task_no_task_available(client_with_tsio, mock_tsio):
     """@internal task submission should NOT emit TaskAvailable."""
-    from zndraw_joblib.dependencies import get_internal_registry
     from zndraw_joblib.registry import InternalRegistry
 
     client_with_tsio.put(
@@ -80,7 +78,7 @@ def test_submit_internal_task_no_task_available(client_with_tsio, mock_tsio):
 
     mock_task = AsyncMock()
     registry = InternalRegistry(tasks={"@internal:modifiers:InternalOp": mock_task})
-    client_with_tsio.app.dependency_overrides[get_internal_registry] = lambda: registry
+    client_with_tsio.app.state.internal_registry = registry
 
     mock_tsio.emit.reset_mock()
 
