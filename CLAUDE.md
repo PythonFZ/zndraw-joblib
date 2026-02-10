@@ -27,20 +27,20 @@ Tests use `pytest-asyncio` with `asyncio_mode = "auto"` — all async test funct
 - **models.py** — SQLAlchemy 2.0 ORM models (`Job`, `Worker`, `Task`, `WorkerJobLink`) inheriting from `zndraw_auth.Base`.
 - **schemas.py** — Pydantic request/response models including `PaginatedResponse[T]` generic envelope.
 - **client.py** — Synchronous client SDK (`JobManager`, `Extension`, `ClaimedTask`) using `httpx`. Workers use `Extension` subclasses with a `category` ClassVar and `run()` method.
-- **dependencies.py** — FastAPI dependencies. `get_async_session_maker` is the single override point for all DB access; `get_locked_async_session` and `get_session_factory` derive from it via DI.
+- **dependencies.py** — FastAPI dependencies for settings, internal registry, and Socket.IO. No session dependencies — uses `SessionDep` and `get_session_maker` from `zndraw_auth.db` directly.
 - **settings.py** — `JobLibSettings` using pydantic-settings with `ZNDRAW_JOBLIB_` env prefix.
 - **exceptions.py** — RFC 9457 Problem Details error types (`JobNotFound`, `SchemaConflict`, `InvalidTaskTransition`, etc.).
 - **sweeper.py** — Background coroutine that cleans up stale workers and orphan jobs.
 
 ### Key Design Decisions
 
-**Dependency injection passthrough**: The package does NOT own database sessions or auth. Host apps override `get_async_session_maker` (single point for all DB access), plus `current_active_user` and `current_superuser` from `zndraw_auth`. Both `get_locked_async_session` and `get_session_factory` derive from `get_async_session_maker` via DI.
+**Dependency injection passthrough**: The package does NOT own database sessions or auth. It uses `SessionDep` and `get_session_maker` from `zndraw_auth.db` directly. Host apps override `get_session_maker` (single point for all DB access), plus `current_active_user` and `current_superuser` from `zndraw_auth`.
 
 **Job naming**: `{room_id}:{category}:{name}` — `@global` for cross-room jobs, otherwise room-scoped. Room IDs cannot contain `@` or `:`.
 
 **Task lifecycle**: `PENDING → CLAIMED → RUNNING → COMPLETED|FAILED|CANCELLED`. Claiming uses optimistic locking (atomic UPDATE with WHERE clause + exponential backoff).
 
-**SQLite compatibility**: An optional `asyncio.Lock` serializes DB access when `enable_db_lock=True`. Disable for PostgreSQL.
+**SQLite compatibility**: Locking is a host app concern. For SQLite, the host app wraps the session maker with an `asyncio.Lock` to serialize DB access.
 
 **Long-polling**: `GET /tasks/{id}` supports `Prefer: wait=N` header. Uses a session factory to create short-lived sessions per poll iteration.
 
@@ -52,7 +52,7 @@ Tests use in-memory SQLite via `conftest.py` fixtures. Key fixtures:
 - `client` — `TestClient` with full dependency overrides
 - `seeded_client` — pre-registered `@global:modifiers:Rotate` job
 - `client_factory` — creates clients with distinct user identities (for multi-worker tests)
-- `async_client` — `httpx.AsyncClient` for concurrent stress tests
+- `async_client` — `httpx.AsyncClient` with SQLite locking for concurrent stress tests
 
 ### Relationship to zndraw-fastapi
 

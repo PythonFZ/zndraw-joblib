@@ -1,7 +1,9 @@
 # tests/conftest.py
 """Shared test fixtures for DRY tests."""
 
+import asyncio
 import uuid
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from unittest.mock import MagicMock
 
@@ -161,8 +163,20 @@ def client_factory(async_session_factory):
 
 
 @pytest.fixture
-async def async_client(app):
-    """Async HTTP client for concurrent stress testing."""
+async def async_client(async_session_factory, mock_current_user):
+    """Async HTTP client with SQLite locking for concurrent stress testing."""
+    db_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def locked_session_maker():
+        async with db_lock:
+            async with async_session_factory() as session:
+                yield session
+
+    app = _build_app(
+        session_maker=locked_session_maker,
+        current_user=mock_current_user,
+    )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",

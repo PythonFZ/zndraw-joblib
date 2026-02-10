@@ -1,7 +1,7 @@
 # zndraw-joblib: Dependency Injection Alignment
 
 **Date**: 2026-02-10
-**Status**: Design
+**Status**: Implemented
 **Scope**: Align with zndraw-auth pure DI, remove redundant wrappers
 
 ---
