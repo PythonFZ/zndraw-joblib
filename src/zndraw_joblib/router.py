@@ -392,7 +392,10 @@ async def list_jobs(
 
     # Paginated + eager-load workers
     result = await session.execute(
-        base_query.options(selectinload(Job.workers)).offset(offset).limit(limit)
+        base_query.options(selectinload(Job.workers))
+        .order_by(Job.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     jobs = result.scalars().all()
 
@@ -444,6 +447,7 @@ async def list_workers_for_room(
         select(Worker)
         .where(Worker.id.in_(worker_id_query))
         .options(selectinload(Worker.jobs))
+        .order_by(Worker.created_at.desc())
         .offset(offset)
         .limit(limit)
     )
@@ -484,7 +488,7 @@ async def list_tasks_for_room(
     # Paginated + eager-load job relationship
     result = await session.execute(
         base_query.options(selectinload(Task.job))
-        .order_by(Task.created_at.asc())
+        .order_by(Task.created_at.desc())
         .offset(offset)
         .limit(limit)
     )
@@ -524,7 +528,7 @@ async def list_tasks_for_job(
     # Paginated + eager-load job relationship
     result = await session.execute(
         base_query.options(selectinload(Task.job))
-        .order_by(Task.created_at.asc())
+        .order_by(Task.created_at.desc())
         .offset(offset)
         .limit(limit)
     )
@@ -859,7 +863,11 @@ async def list_workers(
 
     # Paginated + eager-load jobs
     result = await session.execute(
-        select(Worker).options(selectinload(Worker.jobs)).offset(offset).limit(limit)
+        select(Worker)
+        .options(selectinload(Worker.jobs))
+        .order_by(Worker.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     workers = result.scalars().all()
 

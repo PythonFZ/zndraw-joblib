@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
@@ -55,6 +56,12 @@ class Job(Base):
     name: Mapped[str] = mapped_column(String, index=True)
     schema_: Mapped[dict[str, Any]] = mapped_column("schema", JSON, default=dict)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        index=True,
+    )
 
     # Relationships
     tasks: Mapped[list["Task"]] = relationship(back_populates="job")
@@ -76,6 +83,12 @@ class Worker(Base):
     )
     last_heartbeat: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        index=True,
     )
 
     # Relationships
