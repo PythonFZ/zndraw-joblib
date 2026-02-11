@@ -19,7 +19,6 @@ from zndraw_joblib.events import (
     emit,
 )
 from zndraw_joblib.models import (
-    TERMINAL_STATUSES,
     Job,
     Task,
     TaskStatus,
@@ -105,12 +104,25 @@ async def cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission]
             build_task_status_emission(task, task.job.full_name if task.job else "")
         )
 
-    # Get job IDs this worker is linked to before deleting links
+    # Get links this worker has (need both job_ids and the link objects)
     result = await session.execute(
         select(WorkerJobLink).where(WorkerJobLink.worker_id == worker.id)
     )
     links = result.scalars().all()
     job_ids = [link.job_id for link in links]
+
+    # Fetch room_ids for affected jobs (worker count is changing)
+    if job_ids:
+        result = await session.execute(
+            select(Job.id, Job.room_id).where(Job.id.in_(job_ids))
+        )
+        job_rooms = {row.id: row.room_id for row in result.all()}
+    else:
+        job_rooms = {}
+
+    # Emit JobsInvalidate for all affected rooms (worker count changed)
+    for room_id in set(job_rooms.values()):
+        emissions.add(Emission(JobsInvalidate(), f"room:{room_id}"))
 
     # Delete all links
     for link in links:

@@ -182,6 +182,43 @@ def test_delete_worker_emits_events(client_with_tsio, mock_tsio):
     assert status_calls[0].args[0].status == "failed"
 
 
+def test_delete_worker_emits_jobs_invalidate_when_job_has_other_workers(
+    client_factory, mock_tsio
+):
+    """DELETE /workers/{id} should emit JobsInvalidate even when other workers remain."""
+    c1 = client_factory("worker-1")
+    c1.app.state.tsio = mock_tsio
+    c2 = client_factory("worker-2")
+    c2.app.state.tsio = mock_tsio
+
+    # Worker 1 registers a job
+    resp = c1.put(
+        "/v1/joblib/rooms/@global/jobs",
+        json={"category": "modifiers", "name": "SharedJob", "schema": {}},
+    )
+    assert resp.status_code == 201
+    worker1_id = resp.json()["worker_id"]
+
+    # Worker 2 registers the same job
+    resp = c2.put(
+        "/v1/joblib/rooms/@global/jobs",
+        json={"category": "modifiers", "name": "SharedJob", "schema": {}},
+    )
+    assert resp.status_code == 200
+    mock_tsio.emit.reset_mock()
+
+    # Delete worker 1 — job still has worker 2
+    resp = c1.delete(f"/v1/joblib/workers/{worker1_id}")
+    assert resp.status_code == 204
+
+    calls = mock_tsio.emit.call_args_list
+    invalidate_calls = [c for c in calls if isinstance(c[0][0], JobsInvalidate)]
+    assert len(invalidate_calls) >= 1, (
+        "JobsInvalidate should be emitted when worker count changes"
+    )
+    assert invalidate_calls[0].kwargs["room"] == "room:@global"
+
+
 def test_no_tsio_does_not_break(client):
     """Endpoints work fine without tsio (default None)."""
     resp = client.put(
