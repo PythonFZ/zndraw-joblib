@@ -96,10 +96,14 @@ def test_pagination_all_items_reachable(five_job_client):
     assert len(set(all_names)) == 5  # No duplicates
 
 
-def test_pagination_limit_zero_rejected(five_job_client):
-    """limit=0 should be rejected (ge=1 validation)."""
+def test_pagination_limit_zero_returns_count_only(five_job_client):
+    """limit=0 should return count only: items=[], total=5."""
     response = five_job_client.get("/v1/joblib/rooms/@global/jobs?limit=0")
-    assert response.status_code == 422
+    assert response.status_code == 200
+    page = PaginatedResponse[JobSummary].model_validate(response.json())
+    assert page.items == []
+    assert page.total == 5
+    assert page.limit == 0
 
 
 def test_pagination_negative_offset_rejected(five_job_client):

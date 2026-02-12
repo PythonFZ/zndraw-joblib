@@ -376,7 +376,7 @@ async def register_job(
 async def list_jobs(
     room_id: str,
     session: SessionDep,
-    limit: int = Query(default=50, ge=1, le=500),
+    limit: int = Query(default=50, ge=0, le=500),
     offset: int = Query(default=0, ge=0),
 ):
     """List jobs for a room. Includes @global jobs unless room_id is @global."""
@@ -415,7 +415,7 @@ async def list_jobs(
 async def list_workers_for_room(
     room_id: str,
     session: SessionDep,
-    limit: int = Query(default=50, ge=1, le=500),
+    limit: int = Query(default=50, ge=0, le=500),
     offset: int = Query(default=0, ge=0),
 ):
     """List workers serving jobs in a room. Includes @global workers unless room_id is @global."""
@@ -469,7 +469,7 @@ async def list_tasks_for_room(
     room_id: str,
     session: SessionDep,
     task_status: TaskStatus | None = Query(default=None, alias="status"),
-    limit: int = Query(default=50, ge=1, le=500),
+    limit: int = Query(default=50, ge=0, le=500),
     offset: int = Query(default=0, ge=0),
 ):
     """List tasks for a room, optionally filtered by status. Includes queue position for pending tasks."""
@@ -507,7 +507,7 @@ async def list_tasks_for_job(
     job_name: str,
     session: SessionDep,
     task_status: TaskStatus | None = Query(default=None, alias="status"),
-    limit: int = Query(default=50, ge=1, le=500),
+    limit: int = Query(default=50, ge=0, le=500),
     offset: int = Query(default=0, ge=0),
 ):
     """List tasks for a specific job. Includes queue position for pending tasks."""
@@ -515,7 +515,7 @@ async def list_tasks_for_job(
 
     job = await _resolve_job(session, job_name, room_id)
 
-    base_query = select(Task).where(Task.job_id == job.id)
+    base_query = select(Task).where(Task.job_id == job.id, Task.room_id == room_id)
     if task_status:
         base_query = base_query.where(Task.status == task_status)
 
@@ -836,15 +836,17 @@ async def update_task_status(
     session.add(task)
 
     # Handle orphan job cleanup in the same transaction
+    orphan_emissions: set[Emission] = set()
     if request.status in TERMINAL_STATUSES:
         await session.flush()
-        await _soft_delete_orphan_job(session, task.job_id)
+        orphan_emissions = await _soft_delete_orphan_job(session, task.job_id)
 
     await session.commit()
     await session.refresh(task)
 
     # Emit events after commit
     emissions: set[Emission] = {await _task_status_emission(session, task)}
+    emissions |= orphan_emissions
     await emit(tsio, emissions)
 
     return await _task_response(session, task)
@@ -853,7 +855,7 @@ async def update_task_status(
 @router.get("/workers", response_model=PaginatedResponse[WorkerSummary])
 async def list_workers(
     session: SessionDep,
-    limit: int = Query(default=50, ge=1, le=500),
+    limit: int = Query(default=50, ge=0, le=500),
     offset: int = Query(default=0, ge=0),
 ):
     """List all workers with their job counts."""

@@ -407,6 +407,86 @@ def test_list_tasks_for_global_job_from_room(seeded_client):
     assert str(page.items[0].id) == task1.json()["id"]
 
 
+def test_list_tasks_for_global_job_scoped_to_room(seeded_client):
+    """Listing tasks for a @global job should only return tasks from the requesting room."""
+    # seeded_client has @global:modifiers:Rotate registered
+
+    # Submit task from room_a
+    task_a = seeded_client.post(
+        "/v1/joblib/rooms/room_a/tasks/@global:modifiers:Rotate",
+        json={"payload": {"from": "room_a"}},
+    )
+    assert task_a.status_code == 202
+
+    # Submit task from room_b
+    task_b = seeded_client.post(
+        "/v1/joblib/rooms/room_b/tasks/@global:modifiers:Rotate",
+        json={"payload": {"from": "room_b"}},
+    )
+    assert task_b.status_code == 202
+
+    # Query from room_a — should only see room_a's task
+    response = seeded_client.get(
+        "/v1/joblib/rooms/room_a/jobs/@global:modifiers:Rotate/tasks"
+    )
+    assert response.status_code == 200
+    page = PaginatedResponse[TaskResponse].model_validate(response.json())
+    assert page.total == 1
+    assert len(page.items) == 1
+    assert str(page.items[0].id) == task_a.json()["id"]
+
+    # Query from room_b — should only see room_b's task
+    response = seeded_client.get(
+        "/v1/joblib/rooms/room_b/jobs/@global:modifiers:Rotate/tasks"
+    )
+    assert response.status_code == 200
+    page = PaginatedResponse[TaskResponse].model_validate(response.json())
+    assert page.total == 1
+    assert len(page.items) == 1
+    assert str(page.items[0].id) == task_b.json()["id"]
+
+
+def test_list_tasks_for_internal_job_scoped_to_room(client):
+    """Listing tasks for an @internal job should only return tasks from the requesting room."""
+    from unittest.mock import AsyncMock
+
+    from zndraw_joblib.registry import InternalRegistry
+
+    # Register an @internal job
+    client.put(
+        "/v1/joblib/rooms/@internal/jobs",
+        json={"category": "modifiers", "name": "InternalOp", "schema": {}},
+    )
+
+    mock_task = AsyncMock()
+    registry = InternalRegistry(tasks={"@internal:modifiers:InternalOp": mock_task})
+    client.app.state.internal_registry = registry
+
+    # Submit task from room_a
+    task_a = client.post(
+        "/v1/joblib/rooms/room_a/tasks/@internal:modifiers:InternalOp",
+        json={"payload": {"from": "room_a"}},
+    )
+    assert task_a.status_code == 202
+
+    # Submit task from room_b
+    task_b = client.post(
+        "/v1/joblib/rooms/room_b/tasks/@internal:modifiers:InternalOp",
+        json={"payload": {"from": "room_b"}},
+    )
+    assert task_b.status_code == 202
+
+    # Query from room_a — should only see room_a's task
+    response = client.get(
+        "/v1/joblib/rooms/room_a/jobs/@internal:modifiers:InternalOp/tasks"
+    )
+    assert response.status_code == 200
+    page = PaginatedResponse[TaskResponse].model_validate(response.json())
+    assert page.total == 1
+    assert len(page.items) == 1
+    assert str(page.items[0].id) == task_a.json()["id"]
+
+
 def test_get_task_includes_queue_position(seeded_client):
     """GET /tasks/{task_id} includes queue_position for pending tasks."""
     # Submit 3 tasks
