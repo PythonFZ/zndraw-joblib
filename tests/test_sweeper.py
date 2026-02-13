@@ -587,3 +587,36 @@ async def test_run_sweeper_cleans_up_stale_workers(async_session_factory, test_u
             await sweeper_task
         except asyncio.CancelledError:
             pass  # Expected when cancelling
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stuck_internal_tasks_includes_claimed(async_session_factory):
+    """CLAIMED @internal tasks with old created_at are marked FAILED after timeout."""
+    async with async_session_factory() as session:
+        job = Job(room_id="@internal", category="selections", name="Stuck", schema_={})
+        session.add(job)
+        await session.flush()
+
+        task = Task(
+            job_id=job.id,
+            room_id="test-room",
+            status=TaskStatus.CLAIMED,
+            started_at=None,
+            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        session.add(task)
+        await session.commit()
+        task_id = task.id
+
+    async with async_session_factory() as session:
+        count, _ = await cleanup_stuck_internal_tasks(
+            session, timeout=timedelta(hours=1)
+        )
+        assert count == 1
+
+    async with async_session_factory() as session:
+        result = await session.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one()
+        assert task.status == TaskStatus.FAILED
+        assert task.error == "Internal worker timeout"
+        assert task.completed_at is not None

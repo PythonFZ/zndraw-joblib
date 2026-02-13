@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Callable
 
+from sqlalchemy import func as sa_func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -174,11 +175,11 @@ async def cleanup_stale_workers(
 async def cleanup_stuck_internal_tasks(
     session: AsyncSession, timeout: timedelta
 ) -> tuple[int, set[Emission]]:
-    """Find and fail @internal tasks stuck in RUNNING beyond timeout.
+    """Find and fail @internal tasks stuck in RUNNING or CLAIMED beyond timeout.
 
     Args:
         session: Async database session
-        timeout: How long a RUNNING internal task can run before being considered stuck
+        timeout: How long an internal task can be in RUNNING/CLAIMED before being considered stuck
 
     Returns:
         Tuple of (count of tasks failed, set of emissions).
@@ -193,8 +194,8 @@ async def cleanup_stuck_internal_tasks(
         .options(selectinload(Task.job))
         .where(
             Job.room_id == "@internal",
-            Task.status == TaskStatus.RUNNING,
-            Task.started_at < cutoff,
+            Task.status.in_({TaskStatus.RUNNING, TaskStatus.CLAIMED}),
+            sa_func.coalesce(Task.started_at, Task.created_at) < cutoff,
         )
     )
     stuck_tasks = result.scalars().all()
