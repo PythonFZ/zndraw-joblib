@@ -21,7 +21,11 @@ logger = logging.getLogger(__name__)
 
 
 class InternalExecutor(Protocol):
-    """Protocol for the host-provided executor callback."""
+    """Protocol for the host-provided executor callback.
+
+    Deployment config (base URL, credentials) is captured at creation time.
+    Only per-task data is passed at call time.
+    """
 
     async def __call__(
         self,
@@ -29,7 +33,6 @@ class InternalExecutor(Protocol):
         payload: dict[str, Any],
         room_id: str,
         task_id: str,
-        base_url: str,
     ) -> None: ...
 
 
@@ -63,9 +66,9 @@ def register_internal_tasks(
             cls: type[Extension] = ext_cls, ex: InternalExecutor = executor
         ):
             async def _execute(
-                task_id: str, room_id: str, payload: dict[str, Any], base_url: str
+                task_id: str, room_id: str, payload: dict[str, Any]
             ) -> None:
-                await ex(cls, payload, room_id, task_id, base_url)
+                await ex(cls, payload, room_id, task_id)
 
             return _execute
 

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -78,7 +78,7 @@ TsioDep = Annotated[AsyncServerWrapper | None, Depends(get_tsio)]
 # Valid status transitions
 VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
     TaskStatus.PENDING: {TaskStatus.CLAIMED, TaskStatus.CANCELLED},
-    TaskStatus.CLAIMED: {TaskStatus.RUNNING, TaskStatus.CANCELLED},
+    TaskStatus.CLAIMED: {TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.CANCELLED},
     TaskStatus.RUNNING: {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED},
     TaskStatus.COMPLETED: set(),
     TaskStatus.FAILED: set(),
@@ -576,7 +576,6 @@ async def submit_task(
     job_name: str,
     request: TaskSubmitRequest,
     response: Response,
-    http_request: Request,
     session: SessionDep,
     user: CurrentUserDep,
     internal_registry: InternalRegistryDep,
@@ -613,7 +612,6 @@ async def submit_task(
                 task_id=str(task.id),
                 room_id=room_id,
                 payload=request.payload,
-                base_url=str(http_request.base_url).rstrip("/"),
             )
         except Exception:
             task.status = TaskStatus.FAILED

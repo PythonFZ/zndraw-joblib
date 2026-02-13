@@ -12,7 +12,6 @@ from zndraw_joblib.schemas import (
     WorkerSummary,
 )
 
-
 # ── Jobs ────────────────────────────────────────────────────────────────
 
 

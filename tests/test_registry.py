@@ -54,7 +54,6 @@ async def mock_executor(
     payload: dict[str, Any],
     room_id: str,
     task_id: str,
-    base_url: str,
 ) -> None:
     pass
 
