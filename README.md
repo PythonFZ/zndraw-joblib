@@ -55,10 +55,37 @@ get_session_maker (from zndraw_auth)  ← override this one dependency
 | `get_session_maker` | **Yes** | Single source of truth for all DB sessions (from zndraw_auth) |
 | `current_active_user` | Yes (from zndraw_auth) | Authenticated user identity |
 | `current_superuser` | Yes (from zndraw_auth) | Superuser access control |
+| `verify_writable_room` | Optional | Room writability guard for `register_job` and `submit_task` |
 | `get_tsio` | Optional | Socket.IO server for real-time events |
 | `get_settings` | Optional | Override `JobLibSettings` defaults |
 
 **Note**: SQLite locking is handled by the host application (zndraw-fastapi). For SQLite databases, wrap the session maker with a lock in your app's lifespan context.
+
+### Room Writability Guard
+
+The `verify_writable_room` dependency guards write endpoints (`register_job`, `submit_task`). By default it only validates the `room_id` format. Host apps can override it to add lock checks:
+
+```python
+from fastapi import Path
+from zndraw_joblib import verify_writable_room, validate_room_id
+
+async def get_writable_room(
+    session: SessionDep,
+    current_user: CurrentUserDep,
+    redis: RedisDep,
+    room_id: str = Path(),
+) -> str:
+    validate_room_id(room_id)  # format validation (@ and : checks)
+    room = await verify_room(session, room_id)
+    if room.locked and not current_user.is_superuser:
+        raise HTTPException(status_code=423, detail="Room is locked")
+    # ... additional checks (edit lock, etc.) ...
+    return room_id
+
+app.dependency_overrides[verify_writable_room] = get_writable_room
+```
+
+Read endpoints and existing task/worker operations (updates, heartbeats, disconnects) are **not** affected by this guard.
 
 ## Configuration
 

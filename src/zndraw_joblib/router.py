@@ -18,8 +18,10 @@ from zndraw_socketio import AsyncServerWrapper
 
 from zndraw_joblib.dependencies import (
     JobLibSettingsDep,
+    WritableRoomDep,
     get_internal_registry,
     get_tsio,
+    validate_room_id,
 )
 from zndraw_joblib.events import (
     Emission,
@@ -32,7 +34,6 @@ from zndraw_joblib.exceptions import (
     Forbidden,
     InternalJobNotConfigured,
     InvalidCategory,
-    InvalidRoomId,
     InvalidTaskTransition,
     JobNotFound,
     SchemaConflict,
@@ -223,16 +224,6 @@ def _room_job_filter(room_id: str):
 router = APIRouter(prefix="/v1/joblib", tags=["joblib"])
 
 
-def validate_room_id(room_id: str) -> None:
-    """Validate room_id doesn't contain @ or : (except @global and @internal)."""
-    if room_id in ("@global", "@internal"):
-        return
-    if not room_id or "@" in room_id or ":" in room_id:
-        raise InvalidRoomId.exception(
-            detail=f"Room ID '{room_id}' contains invalid characters (@ or :)"
-        )
-
-
 @router.post(
     "/workers", response_model=WorkerResponse, status_code=status.HTTP_201_CREATED
 )
@@ -258,7 +249,7 @@ async def create_worker(
     status_code=status.HTTP_201_CREATED,
 )
 async def register_job(
-    room_id: str,
+    room_id: WritableRoomDep,
     request: JobRegisterRequest,
     response: Response,
     session: SessionDep,
@@ -267,9 +258,6 @@ async def register_job(
     tsio: TsioDep,
 ):
     """Register a job for a room. Creates worker and link if not exists."""
-    # Validate room_id
-    validate_room_id(room_id)
-
     # Check admin for @global and @internal
     if room_id in ("@global", "@internal") and not user.is_superuser:
         raise Forbidden.exception(
@@ -572,7 +560,7 @@ async def get_job(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def submit_task(
-    room_id: str,
+    room_id: WritableRoomDep,
     job_name: str,
     request: TaskSubmitRequest,
     response: Response,
@@ -582,8 +570,6 @@ async def submit_task(
     tsio: TsioDep,
 ):
     """Submit a task for processing."""
-    validate_room_id(room_id)
-
     job = await _resolve_job(session, job_name, room_id)
 
     # Validate internal registry BEFORE creating the task to avoid orphans

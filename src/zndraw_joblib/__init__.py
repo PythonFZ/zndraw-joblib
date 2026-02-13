@@ -2,7 +2,14 @@
 """ZnDraw Job Management Library."""
 
 from zndraw_joblib.client import Category, ClaimedTask, Extension, JobManager
-from zndraw_joblib.dependencies import JobLibSettingsDep, get_joblib_settings, get_tsio
+from zndraw_joblib.dependencies import (
+    JobLibSettingsDep,
+    WritableRoomDep,
+    get_joblib_settings,
+    get_tsio,
+    validate_room_id,
+    verify_writable_room,
+)
 from zndraw_joblib.events import (
     Emission,
     FrozenEvent,
@@ -57,6 +64,9 @@ __all__ = [
     "get_joblib_settings",
     "JobLibSettingsDep",
     "get_tsio",
+    "verify_writable_room",
+    "WritableRoomDep",
+    "validate_room_id",
     # Exceptions
     "ProblemException",
     "problem_exception_handler",
