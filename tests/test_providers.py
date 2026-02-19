@@ -6,7 +6,6 @@ import uuid
 from zndraw_joblib.dependencies import request_hash
 from zndraw_joblib.schemas import (
     PaginatedResponse,
-    ProviderInfoResponse,
     ProviderResponse,
 )
 
@@ -150,7 +149,7 @@ def test_get_provider_info(client):
         "/v1/joblib/rooms/@global/providers/@global:filesystem:local/info"
     )
     assert resp.status_code == 200
-    data = ProviderInfoResponse.model_validate(resp.json())
+    data = ProviderResponse.model_validate(resp.json())
     assert data.category == "filesystem"
     assert data.name == "local"
     assert data.schema_ == {"path": {"type": "string", "default": "/"}}
@@ -320,3 +319,68 @@ def test_request_hash_different_params():
     h1 = request_hash({"path": "/data"})
     h2 = request_hash({"path": "/other"})
     assert h1 != h2
+
+
+# --- Authorization ---
+
+
+def test_delete_provider_forbidden_other_user(client_factory):
+    """A non-superuser cannot delete another user's provider."""
+    alice = client_factory("alice", is_superuser=False)
+    bob = client_factory("bob", is_superuser=False)
+
+    # Alice registers a provider
+    resp = alice.put(
+        "/v1/joblib/rooms/@global/providers",
+        json={"category": "filesystem", "name": "local", "schema": {}},
+    )
+    # Non-superuser can't register @global, so use a room
+    resp = alice.put(
+        "/v1/joblib/rooms/room-42/providers",
+        json={"category": "filesystem", "name": "local", "schema": {}},
+    )
+    assert resp.status_code == 201
+    provider_id = resp.json()["id"]
+
+    # Bob cannot delete Alice's provider
+    del_resp = bob.delete(f"/v1/joblib/providers/{provider_id}")
+    assert del_resp.status_code == 403
+
+
+def test_upload_result_forbidden_other_user(client_factory):
+    """A non-superuser cannot upload results for another user's provider."""
+    alice = client_factory("alice", is_superuser=False)
+    bob = client_factory("bob", is_superuser=False)
+
+    resp = alice.put(
+        "/v1/joblib/rooms/room-42/providers",
+        json={"category": "filesystem", "name": "local", "schema": {}},
+    )
+    assert resp.status_code == 201
+    provider_id = resp.json()["id"]
+
+    upload_resp = bob.post(
+        f"/v1/joblib/providers/{provider_id}/results",
+        json={"request_hash": "abc", "data": {}},
+    )
+    assert upload_resp.status_code == 403
+
+
+def test_register_global_provider_requires_superuser(client_factory):
+    """Non-superusers cannot register @global providers."""
+    normal = client_factory("normal-user", is_superuser=False)
+    resp = normal.put(
+        "/v1/joblib/rooms/@global/providers",
+        json={"category": "filesystem", "name": "local", "schema": {}},
+    )
+    assert resp.status_code == 403
+
+
+def test_register_global_provider_superuser_ok(client_factory):
+    """Superusers can register @global providers."""
+    admin = client_factory("admin-user", is_superuser=True)
+    resp = admin.put(
+        "/v1/joblib/rooms/@global/providers",
+        json={"category": "filesystem", "name": "local", "schema": {}},
+    )
+    assert resp.status_code == 201

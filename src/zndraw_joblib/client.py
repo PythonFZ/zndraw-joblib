@@ -451,10 +451,11 @@ class JobManager:
         if reg is None:
             return
 
-        self.api.http.delete(
+        resp = self.api.http.delete(
             f"{self.api.base_url}/v1/joblib/providers/{reg.id}",
             headers=self.api.get_headers(),
         )
+        self.api.raise_for_status(resp)
 
         if self.tsio is not None:
             self.tsio.emit(

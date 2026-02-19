@@ -1,11 +1,16 @@
 # src/zndraw_joblib/schemas.py
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Any, Generic, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Optional, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from zndraw_joblib.models import TaskStatus
+
+if TYPE_CHECKING:
+    from zndraw_joblib.models import ProviderRecord
 
 
 class JobRegisterRequest(BaseModel):
@@ -112,15 +117,25 @@ class ProviderResponse(BaseModel):
 
     model_config = {"populate_by_name": True}
 
+    @classmethod
+    def from_record(cls, record: ProviderRecord) -> ProviderResponse:
+        return cls(
+            id=record.id,
+            room_id=record.room_id,
+            category=record.category,
+            name=record.name,
+            full_name=record.full_name,
+            schema=record.schema_,
+            worker_id=record.worker_id,
+            created_at=record.created_at,
+        )
 
-class ProviderInfoResponse(BaseModel):
-    id: UUID
-    room_id: str
-    category: str
-    name: str
-    full_name: str
-    schema_: dict[str, Any] = Field(alias="schema")
-    worker_id: UUID
-    created_at: datetime
 
-    model_config = {"populate_by_name": True}
+class ProviderReadPendingResponse(BaseModel):
+    status: str
+    request_hash: str
+
+
+class ProviderResultUploadRequest(BaseModel):
+    request_hash: str
+    data: Any

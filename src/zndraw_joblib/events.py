@@ -7,6 +7,7 @@ of emissions via the Emission NamedTuple.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any, NamedTuple
 
@@ -80,11 +81,16 @@ class ProvidersInvalidate(FrozenEvent):
 
 
 class ProviderRequest(FrozenEvent):
-    """Server dispatches a read request to a provider client."""
+    """Server dispatches a read request to a provider client.
+
+    ``params`` is stored as a canonical JSON string (sorted keys, compact
+    separators) so it is both hashable (frozen model) and directly usable
+    by Socket.IO clients without tuple-to-dict conversion.
+    """
 
     request_id: str
     provider_name: str  # full_name: room_id:category:name
-    params: tuple[tuple[str, Any], ...]
+    params: str  # canonical JSON string
 
     @classmethod
     def from_dict_params(
@@ -94,11 +100,11 @@ class ProviderRequest(FrozenEvent):
         provider_name: str,
         params: dict[str, Any],
     ) -> "ProviderRequest":
-        """Create from a dict, converting params to a hashable tuple form."""
+        """Create from a dict, converting params to canonical JSON."""
         return cls(
             request_id=request_id,
             provider_name=provider_name,
-            params=tuple(sorted(params.items())),
+            params=json.dumps(params, sort_keys=True, separators=(",", ":")),
         )
 
 

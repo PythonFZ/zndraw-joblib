@@ -62,9 +62,10 @@ from zndraw_joblib.schemas import (
     JobResponse,
     JobSummary,
     PaginatedResponse,
-    ProviderInfoResponse,
+    ProviderReadPendingResponse,
     ProviderRegisterRequest,
     ProviderResponse,
+    ProviderResultUploadRequest,
     TaskClaimRequest,
     TaskClaimResponse,
     TaskResponse,
@@ -977,7 +978,7 @@ async def _resolve_provider(
     status_code=status.HTTP_201_CREATED,
 )
 async def register_provider(
-    room_id: str,
+    room_id: WritableRoomDep,
     request: ProviderRegisterRequest,
     response: Response,
     session: SessionDep,
@@ -985,7 +986,10 @@ async def register_provider(
     tsio: TsioDep,
 ):
     """Register or update a provider. Idempotent on (room_id, category, name)."""
-    validate_room_id(room_id)
+    if room_id == "@global" and not user.is_superuser:
+        raise Forbidden.exception(
+            detail="Admin required for @global provider registration"
+        )
 
     # Handle worker: use provided worker_id or auto-create
     if request.worker_id:
@@ -1036,16 +1040,7 @@ async def register_provider(
     await session.refresh(provider)
     await emit(tsio, {Emission(ProvidersInvalidate(), f"room:{provider.room_id}")})
 
-    return ProviderResponse(
-        id=provider.id,
-        room_id=provider.room_id,
-        category=provider.category,
-        name=provider.name,
-        full_name=provider.full_name,
-        schema=provider.schema_,
-        worker_id=provider.worker_id,
-        created_at=provider.created_at,
-    )
+    return ProviderResponse.from_record(provider)
 
 
 @router.get(
@@ -1075,25 +1070,13 @@ async def list_providers(
     )
     providers = result.scalars().all()
 
-    items = [
-        ProviderResponse(
-            id=p.id,
-            room_id=p.room_id,
-            category=p.category,
-            name=p.name,
-            full_name=p.full_name,
-            schema=p.schema_,
-            worker_id=p.worker_id,
-            created_at=p.created_at,
-        )
-        for p in providers
-    ]
+    items = [ProviderResponse.from_record(p) for p in providers]
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get(
     "/rooms/{room_id}/providers/{provider_name:path}/info",
-    response_model=ProviderInfoResponse,
+    response_model=ProviderResponse,
 )
 async def get_provider_info(
     room_id: str,
@@ -1104,19 +1087,14 @@ async def get_provider_info(
     validate_room_id(room_id)
     provider = await _resolve_provider(session, provider_name, room_id)
 
-    return ProviderInfoResponse(
-        id=provider.id,
-        room_id=provider.room_id,
-        category=provider.category,
-        name=provider.name,
-        full_name=provider.full_name,
-        schema=provider.schema_,
-        worker_id=provider.worker_id,
-        created_at=provider.created_at,
-    )
+    return ProviderResponse.from_record(provider)
 
 
-@router.get("/rooms/{room_id}/providers/{provider_name:path}")
+@router.get(
+    "/rooms/{room_id}/providers/{provider_name:path}",
+    response_model=ProviderReadPendingResponse,
+    responses={200: {"description": "Cached result", "content": {"application/json": {}}}},
+)
 async def read_provider(
     room_id: str,
     provider_name: str,
@@ -1207,7 +1185,7 @@ async def delete_provider(
 )
 async def upload_provider_result(
     provider_id: UUID,
-    request: Request,
+    upload: ProviderResultUploadRequest,
     session: SessionDep,
     user: CurrentUserDep,
     result_backend: ResultBackendDep,
@@ -1227,17 +1205,13 @@ async def upload_provider_result(
             detail="Not authorized to upload results for this provider"
         )
 
-    body = await request.json()
-    rhash = body["request_hash"]
-    data = body["data"]
-
-    cache_key = f"provider-result:{provider.full_name}:{rhash}"
-    inflight_key = f"provider-inflight:{provider.full_name}:{rhash}"
+    cache_key = f"provider-result:{provider.full_name}:{upload.request_hash}"
+    inflight_key = f"provider-inflight:{provider.full_name}:{upload.request_hash}"
 
     # Store result
     await result_backend.store(
         cache_key,
-        json.dumps(data).encode(),
+        json.dumps(upload.data).encode(),
         settings.provider_result_ttl_seconds,
     )
 
@@ -1251,7 +1225,7 @@ async def upload_provider_result(
             Emission(
                 ProviderResultReady(
                     provider_name=provider.full_name,
-                    request_hash=rhash,
+                    request_hash=upload.request_hash,
                 ),
                 f"room:{provider.room_id}",
             )
