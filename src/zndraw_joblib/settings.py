@@ -18,5 +18,6 @@ class JobLibSettings(BaseSettings):
     internal_task_timeout_seconds: int = 3600  # 1 hour
 
     # Provider settings
+    allowed_provider_categories: list[str] | None = None  # None = unrestricted
     provider_result_ttl_seconds: int = 300
     provider_inflight_ttl_seconds: int = 30

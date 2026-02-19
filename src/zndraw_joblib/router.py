@@ -983,12 +983,21 @@ async def register_provider(
     response: Response,
     session: SessionDep,
     user: CurrentUserDep,
+    settings: SettingsDep,
     tsio: TsioDep,
 ):
     """Register or update a provider. Idempotent on (room_id, category, name)."""
     if room_id == "@global" and not user.is_superuser:
         raise Forbidden.exception(
             detail="Admin required for @global provider registration"
+        )
+
+    if (
+        settings.allowed_provider_categories is not None
+        and request.category not in settings.allowed_provider_categories
+    ):
+        raise InvalidCategory.exception(
+            detail=f"Provider category '{request.category}' not in allowed list: {settings.allowed_provider_categories}"
         )
 
     # Handle worker: use provided worker_id or auto-create

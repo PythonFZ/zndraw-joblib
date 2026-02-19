@@ -384,3 +384,19 @@ def test_register_global_provider_superuser_ok(client_factory):
         json={"category": "filesystem", "name": "local", "schema": {}},
     )
     assert resp.status_code == 201
+
+
+def test_register_provider_category_rejected(app, client):
+    """Provider category rejected when allowed_provider_categories is set."""
+    app.state.joblib_settings.allowed_provider_categories = ["frames"]
+    resp = _register_provider(client, category="filesystem")
+    assert resp.status_code == 400
+    app.state.joblib_settings.allowed_provider_categories = None  # reset
+
+
+def test_register_provider_category_allowed(app, client):
+    """Provider category accepted when in the allowed list."""
+    app.state.joblib_settings.allowed_provider_categories = ["filesystem"]
+    resp = _register_provider(client, category="filesystem")
+    assert resp.status_code == 201
+    app.state.joblib_settings.allowed_provider_categories = None  # reset
