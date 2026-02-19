@@ -495,6 +495,7 @@ class JobManager:
             category=provider_cls.category,
             name=name,
             schema=schema,
+            content_type=provider_cls.content_type,
             worker_id=self._worker_id,
         )
 
@@ -642,9 +643,14 @@ class JobManager:
             )
             return
 
+        if reg.cls.content_type == "application/json":
+            data = json.dumps(result).encode()
+        else:
+            data = result  # assumed bytes for binary content types
+
         resp = self.api.http.post(
             f"{self.api.base_url}/v1/joblib/providers/{reg.id}/results",
-            headers=self.api.get_headers(),
-            json={"request_hash": event.request_id, "data": result},
+            content=data,
+            headers={**self.api.get_headers(), "X-Request-Hash": event.request_id},
         )
         self.api.raise_for_status(resp)

@@ -100,6 +100,7 @@ class ProviderRegisterRequest(BaseModel):
     category: str
     name: str
     schema_: dict[str, Any] = Field(default={}, alias="schema")
+    content_type: str = "application/json"
     worker_id: UUID | None = None
 
     model_config = {"populate_by_name": True}
@@ -134,8 +135,3 @@ class ProviderResponse(BaseModel):
 class ProviderReadPendingResponse(BaseModel):
     status: str
     request_hash: str
-
-
-class ProviderResultUploadRequest(BaseModel):
-    request_hash: str
-    data: Any

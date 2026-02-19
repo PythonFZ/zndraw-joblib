@@ -234,6 +234,15 @@ class FilesystemRead(Provider):
     def read(self, handler):
         return handler.ls(self.path, detail=True)
 
+# Binary provider (e.g. msgpack, arrow, parquet)
+class AtomsProvider(Provider):
+    category: ClassVar[str] = "atoms"
+    content_type: ClassVar[str] = "application/x-msgpack"
+    index: int = 0
+
+    def read(self, handler) -> bytes:
+        return handler.get_atoms_msgpack(self.index)
+
 manager.register_provider(
     FilesystemRead,
     name="local",
@@ -321,7 +330,14 @@ Providers are a generic abstraction for connected Python clients to **serve data
 | **Purpose** | User-initiated computation | Remote resource access |
 | **Dispatch** | Workers pull/claim (FIFO) | Server pushes to specific provider |
 | **Results** | Side effects (modify room state) | Data returned to caller (cached) |
+| **Formats** | JSON payloads | JSON or binary (msgpack, arrow, etc.) |
 | **HTTP** | POST (creates task) | GET (reads resource) -> 200 or 202 |
+
+### Content Types
+
+Each provider declares its response format via `content_type: ClassVar[str]` (defaults to `"application/json"`). This is stored on the `ProviderRecord` at registration and used as the response `media_type` when returning cached results. Providers with `content_type != "application/json"` must return `bytes` from `read()`.
+
+The result upload endpoint stores raw request bytes as-is -- no parsing or re-serialization. The `X-Request-Hash` header identifies the request.
 
 ### Provider Endpoints
 
@@ -330,7 +346,7 @@ PUT    /rooms/{room_id}/providers                        # Register (201/200)
 GET    /rooms/{room_id}/providers                        # List (paginated)
 GET    /rooms/{room_id}/providers/{name}/info             # Schema + metadata
 GET    /rooms/{room_id}/providers/{name}?params           # Read (200 cached / 202 dispatched)
-POST   /providers/{provider_id}/results                   # Upload result (204)
+POST   /providers/{provider_id}/results                   # Upload result (204, X-Request-Hash header)
 DELETE /providers/{provider_id}                            # Unregister (204)
 ```
 
@@ -342,9 +358,9 @@ DELETE /providers/{provider_id}                            # Unregister (204)
                          -> MISS: acquire inflight, emit ProviderRequest -> return 202
 3. Client:   receives ProviderRequest via Socket.IO
              calls provider.read(handler)
-             POST /providers/{id}/results
-4. Server:   store in ResultBackend, emit ProviderResultReady
-5. Frontend: receives ProviderResultReady, re-fetches -> 200
+             POST /providers/{id}/results (raw body + X-Request-Hash header)
+4. Server:   store raw bytes in ResultBackend, emit ProviderResultReady
+5. Frontend: receives ProviderResultReady, re-fetches -> 200 (content_type from provider)
 ```
 
 ### Result Backend
@@ -529,4 +545,4 @@ Models use SQLAlchemy 2.0 ORM inheriting from `zndraw_auth.Base`:
 - **Worker** - Tracks `last_heartbeat`, linked to user via `user_id`
 - **Task** - Status state machine, linked to job and claiming worker
 - **WorkerJobLink** - M:N bridge between Worker and Job
-- **ProviderRecord** - `(room_id, category, name)` unique, linked to worker
+- **ProviderRecord** - `(room_id, category, name)` unique, linked to worker, stores `content_type` for response media type

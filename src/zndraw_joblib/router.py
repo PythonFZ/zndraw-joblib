@@ -1,6 +1,5 @@
 # src/zndraw_joblib/router.py
 import asyncio
-import json
 import logging
 import random
 import re
@@ -65,7 +64,6 @@ from zndraw_joblib.schemas import (
     ProviderReadPendingResponse,
     ProviderRegisterRequest,
     ProviderResponse,
-    ProviderResultUploadRequest,
     TaskClaimRequest,
     TaskClaimResponse,
     TaskResponse,
@@ -1030,6 +1028,7 @@ async def register_provider(
 
     if existing:
         existing.schema_ = request.schema_
+        existing.content_type = request.content_type
         existing.worker_id = worker.id
         existing.user_id = user.id
         provider = existing
@@ -1040,6 +1039,7 @@ async def register_provider(
             name=request.name,
             room_id=room_id,
             schema_=request.schema_,
+            content_type=request.content_type,
             user_id=user.id,
             worker_id=worker.id,
         )
@@ -1131,7 +1131,7 @@ async def read_provider(
     if cached is not None:
         return Response(
             content=cached,
-            media_type="application/json",
+            media_type=provider.content_type,
             status_code=200,
         )
 
@@ -1194,12 +1194,13 @@ async def delete_provider(
 )
 async def upload_provider_result(
     provider_id: UUID,
-    upload: ProviderResultUploadRequest,
+    request: Request,
     session: SessionDep,
     user: CurrentUserDep,
     result_backend: ResultBackendDep,
     settings: SettingsDep,
     tsio: TsioDep,
+    x_request_hash: Annotated[str, Header()],
 ):
     """Provider worker uploads a read result."""
     result = await session.execute(
@@ -1214,13 +1215,14 @@ async def upload_provider_result(
             detail="Not authorized to upload results for this provider"
         )
 
-    cache_key = f"provider-result:{provider.full_name}:{upload.request_hash}"
-    inflight_key = f"provider-inflight:{provider.full_name}:{upload.request_hash}"
+    cache_key = f"provider-result:{provider.full_name}:{x_request_hash}"
+    inflight_key = f"provider-inflight:{provider.full_name}:{x_request_hash}"
 
-    # Store result
+    # Store raw body as-is (JSON or binary depending on provider content_type)
+    data = await request.body()
     await result_backend.store(
         cache_key,
-        json.dumps(upload.data).encode(),
+        data,
         settings.provider_result_ttl_seconds,
     )
 
@@ -1234,7 +1236,7 @@ async def upload_provider_result(
             Emission(
                 ProviderResultReady(
                     provider_name=provider.full_name,
-                    request_hash=upload.request_hash,
+                    request_hash=x_request_hash,
                 ),
                 f"room:{provider.room_id}",
             )

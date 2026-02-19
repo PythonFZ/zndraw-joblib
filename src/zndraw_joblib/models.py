@@ -113,6 +113,7 @@ class ProviderRecord(Base):
     category: Mapped[str] = mapped_column(String, index=True)
     name: Mapped[str] = mapped_column(String, index=True)
     schema_: Mapped[dict[str, Any]] = mapped_column("schema", JSON, default=dict)
+    content_type: Mapped[str] = mapped_column(String, default="application/json")
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("user.id", ondelete="CASCADE"), index=True
     )

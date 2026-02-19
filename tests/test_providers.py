@@ -1,6 +1,7 @@
 # tests/test_providers.py
 """Tests for provider system endpoints."""
 
+import json
 import uuid
 
 from zndraw_joblib.dependencies import request_hash
@@ -216,7 +217,8 @@ def test_read_provider_cached_200(client):
     # Upload result
     upload_resp = client.post(
         f"/v1/joblib/providers/{provider_id}/results",
-        json={"request_hash": rhash, "data": [{"name": "file.xyz", "size": 42}]},
+        content=json.dumps([{"name": "file.xyz", "size": 42}]).encode(),
+        headers={"X-Request-Hash": rhash},
     )
     assert upload_resp.status_code == 204
 
@@ -273,7 +275,8 @@ def test_delete_provider_not_found(client):
 def test_upload_result_not_found(client):
     resp = client.post(
         f"/v1/joblib/providers/{uuid.uuid4()}/results",
-        json={"request_hash": "abc", "data": {}},
+        content=b"{}",
+        headers={"X-Request-Hash": "abc"},
     )
     assert resp.status_code == 404
 
@@ -361,7 +364,8 @@ def test_upload_result_forbidden_other_user(client_factory):
 
     upload_resp = bob.post(
         f"/v1/joblib/providers/{provider_id}/results",
-        json={"request_hash": "abc", "data": {}},
+        content=b"{}",
+        headers={"X-Request-Hash": "abc"},
     )
     assert upload_resp.status_code == 403
 

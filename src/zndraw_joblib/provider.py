@@ -27,12 +27,14 @@ class Provider(BaseModel):
     """
 
     category: ClassVar[str]
+    content_type: ClassVar[str] = "application/json"
 
     def read(self, handler: Any) -> Any:
         """Process a read request against *handler*.
 
         Subclasses must override this method. *handler* is the
         provider-specific backend object (e.g., an fsspec filesystem).
-        The return value must be JSON-serializable.
+        The return value must be JSON-serializable (for ``application/json``
+        providers) or ``bytes`` (for binary content types).
         """
         raise NotImplementedError
