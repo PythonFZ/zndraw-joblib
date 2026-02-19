@@ -194,6 +194,32 @@ def client_factory(async_session_factory):
 
 
 @pytest.fixture
+async def threadsafe_engine(tmp_path):
+    """File-based SQLite engine for tests with background threads.
+
+    Unlike the in-memory StaticPool engine, this gives each thread its own
+    connection so SQLite's internal locking handles concurrent access.
+    """
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+def threadsafe_client(threadsafe_engine, mock_current_user):
+    """TestClient safe for multi-threaded tests (background claim loop, etc.)."""
+    factory = async_sessionmaker(
+        threadsafe_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    app = _build_app(session_maker=factory, current_user=mock_current_user)
+    return TestClient(app)
+
+
+@pytest.fixture
 async def async_client(async_session_factory, mock_current_user):
     """Async HTTP client with SQLite locking for concurrent stress testing."""
     db_lock = asyncio.Lock()

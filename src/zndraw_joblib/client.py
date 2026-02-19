@@ -1,13 +1,15 @@
 # src/zndraw_joblib/client.py
 """Client SDK for ZnDraw JobLib workers."""
 
+import json
 import logging
+import signal
 import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, Generic, Iterator, Protocol, TypeVar
+from typing import Any, Callable, ClassVar, Generic, Iterator, Protocol, TypeVar
 from uuid import UUID
 
 import httpx
@@ -19,6 +21,8 @@ from zndraw_joblib.events import (
     JoinProviderRoom,
     LeaveJobRoom,
     LeaveProviderRoom,
+    ProviderRequest,
+    TaskAvailable,
 )
 from zndraw_joblib.models import TaskStatus
 from zndraw_joblib.provider import Provider
@@ -98,14 +102,44 @@ class _RegisteredProvider:
 
 
 class JobManager:
-    """Main entry point for workers. Registers jobs and claims tasks."""
+    """Main entry point for workers. Registers jobs and claims tasks.
 
-    def __init__(self, api: ApiManager, tsio: SyncClientWrapper | None = None):
+    When ``execute`` is provided, background threads automatically claim
+    and execute tasks after the first ``register()`` or
+    ``register_provider()`` call.  Without ``execute``, manual
+    ``claim()`` / ``listen()`` still work as before.
+    """
+
+    def __init__(
+        self,
+        api: ApiManager,
+        tsio: SyncClientWrapper | None = None,
+        *,
+        execute: Callable[[ClaimedTask], None] | None = None,
+        heartbeat_interval: float = 30.0,
+        polling_interval: float = 2.0,
+    ):
         self.api = api
         self.tsio = tsio
+        self._execute = execute
+        self._heartbeat_interval = heartbeat_interval
+        self._polling_interval = polling_interval
         self._registry: dict[str, type[Extension]] = {}
         self._worker_id: UUID | None = None
         self._providers: dict[str, _RegisteredProvider] = {}
+
+        # Threading state
+        self._stop = threading.Event()
+        self._task_ready = threading.Event()
+        self._threads_started: bool = False
+        self._threads: list[threading.Thread] = []
+
+        # Register SIO handlers up front (cheap no-ops when dicts are empty)
+        if self.tsio is not None:
+            self.tsio.on(ProviderRequest, self._on_provider_request)
+            self.tsio.on(TaskAvailable, self._on_task_available)
+
+    # -- Container protocol --------------------------------------------------
 
     def __getitem__(self, key: str) -> type[Extension]:
         return self._registry[key]
@@ -125,40 +159,83 @@ class JobManager:
     def __exit__(self, *_exc_info) -> None:
         self.disconnect()
 
+    # -- Lifecycle ------------------------------------------------------------
+
     def disconnect(self) -> None:
         """Gracefully disconnect the worker.
 
-        1. Emits LeaveProviderRoom for each registered provider (socket room cleanup)
-        2. Emits LeaveJobRoom for each registered job (socket room cleanup)
-        3. Calls DELETE /workers/{worker_id} (DB cleanup: fail tasks, remove links, soft-delete orphan jobs)
+        Idempotent — safe to call multiple times (e.g. signal handler + __exit__).
+
+        1. Signals background threads to stop and waits for them to finish
+        2. Emits LeaveProviderRoom / LeaveJobRoom for socket room cleanup
+        3. Calls DELETE /workers/{worker_id} (DB cleanup)
         4. Clears local registry state
         """
-        # Clean up providers first (before worker deletion cascades them)
+        if self._worker_id is None:
+            self._stop.set()
+            return
+
+        self._stop.set()
+        self._task_ready.set()  # wake claim loop if sleeping
+
+        # Wait for background threads to finish their current work
+        for t in self._threads:
+            t.join(timeout=10.0)
+        self._threads.clear()
+
+        worker_id = self._worker_id
+        self._worker_id = None
+
         if self.tsio is not None:
-            for full_name, reg in self._providers.items():
+            for full_name in self._providers:
                 self.tsio.emit(
                     LeaveProviderRoom(
                         provider_name=full_name,
-                        worker_id=str(self._worker_id),
+                        worker_id=str(worker_id),
                     )
                 )
 
-        if self.tsio is not None and self._worker_id is not None:
+        if self.tsio is not None:
             for job_name in self._registry:
                 self.tsio.emit(
-                    LeaveJobRoom(job_name=job_name, worker_id=str(self._worker_id))
+                    LeaveJobRoom(job_name=job_name, worker_id=str(worker_id))
                 )
 
-        if self._worker_id is not None:
-            resp = self.api.http.delete(
-                f"{self.api.base_url}/v1/joblib/workers/{self._worker_id}",
-                headers=self.api.get_headers(),
-            )
-            self.api.raise_for_status(resp)
+        resp = self.api.http.delete(
+            f"{self.api.base_url}/v1/joblib/workers/{worker_id}",
+            headers=self.api.get_headers(),
+        )
+        self.api.raise_for_status(resp)
 
         self._providers.clear()
         self._registry.clear()
-        self._worker_id = None
+
+    def wait(self) -> None:
+        """Block until ``disconnect()`` is called or a signal is received.
+
+        When called from the main thread, installs SIGINT/SIGTERM handlers
+        that trigger ``disconnect()`` and restores originals on exit.
+        From other threads, simply blocks on the stop event.
+        """
+        is_main = threading.current_thread() is threading.main_thread()
+
+        if is_main:
+            original_sigint = signal.getsignal(signal.SIGINT)
+            original_sigterm = signal.getsignal(signal.SIGTERM)
+
+            def _shutdown(signum: int, _frame: Any) -> None:
+                logger.info("Received signal %s, shutting down...", signum)
+                self.disconnect()
+
+            signal.signal(signal.SIGINT, _shutdown)
+            signal.signal(signal.SIGTERM, _shutdown)
+
+        try:
+            self._stop.wait()
+        finally:
+            if is_main:
+                signal.signal(signal.SIGINT, original_sigint)
+                signal.signal(signal.SIGTERM, original_sigterm)
 
     @property
     def worker_id(self) -> UUID | None:
@@ -178,6 +255,8 @@ class JobManager:
         self.api.raise_for_status(response)
         self._worker_id = UUID(response.json()["id"])
         return self._worker_id
+
+    # -- Job registration -----------------------------------------------------
 
     def register(
         self,
@@ -246,6 +325,10 @@ class JobManager:
             self.tsio.emit(
                 JoinJobRoom(job_name=full_name, worker_id=str(self._worker_id))
             )
+
+        self._ensure_background_threads()
+
+    # -- Task operations ------------------------------------------------------
 
     def claim(self) -> ClaimedTask | None:
         """
@@ -378,6 +461,8 @@ class JobManager:
         self.api.raise_for_status(response)
         return response.json()["id"]
 
+    # -- Provider operations --------------------------------------------------
+
     def register_provider(
         self,
         provider_cls: type[Provider],
@@ -443,6 +528,7 @@ class JobManager:
                 )
             )
 
+        self._ensure_background_threads()
         return provider_id
 
     def unregister_provider(self, full_name: str) -> None:
@@ -473,3 +559,84 @@ class JobManager:
         so the Extension can look up the right handler by provider full_name.
         """
         return {full_name: reg.handler for full_name, reg in self._providers.items()}
+
+    # -- Background threads ---------------------------------------------------
+
+    def _ensure_background_threads(self) -> None:
+        """Start heartbeat + claim threads on first registration."""
+        if self._threads_started:
+            return
+        self._threads_started = True
+
+        t = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        t.start()
+        self._threads.append(t)
+        if self._execute is not None:
+            t = threading.Thread(target=self._claim_loop, daemon=True)
+            t.start()
+            self._threads.append(t)
+
+    def _heartbeat_loop(self) -> None:
+        """Send periodic heartbeats until stopped."""
+        while not self._stop.wait(self._heartbeat_interval):
+            try:
+                self.heartbeat()
+            except Exception as e:
+                logger.warning("Heartbeat failed: %s", e)
+
+    def _claim_loop(self) -> None:
+        """Claim and execute tasks until stopped."""
+        while not self._stop.is_set():
+            self._task_ready.clear()
+            try:
+                claimed = self.claim()
+            except Exception as e:
+                logger.warning("Claim failed: %s", e)
+                self._task_ready.wait(timeout=self._polling_interval)
+                continue
+            if claimed is not None:
+                try:
+                    self.start(claimed)
+                    self._execute(claimed)
+                except Exception as e:
+                    try:
+                        self.fail(claimed, str(e))
+                    except Exception:
+                        logger.exception(
+                            "Failed to mark task %s as failed", claimed.task_id
+                        )
+                    else:
+                        logger.error("Task %s failed: %s", claimed.task_id, e)
+                else:
+                    try:
+                        self.complete(claimed)
+                    except Exception:
+                        logger.exception(
+                            "Failed to mark task %s completed", claimed.task_id
+                        )
+            else:
+                self._task_ready.wait(timeout=self._polling_interval)
+
+    # -- SIO event handlers ---------------------------------------------------
+
+    def _on_task_available(self, _event: TaskAvailable) -> None:
+        """Wake the claim loop when a new task is available."""
+        self._task_ready.set()
+
+    def _on_provider_request(self, event: ProviderRequest) -> None:
+        """Handle incoming ProviderRequest dispatched by the server."""
+        reg = self._providers.get(event.provider_name)
+        if reg is None:
+            logger.warning("Unknown provider: %s", event.provider_name)
+            return
+
+        params = json.loads(event.params)
+        instance = reg.cls(**params)
+        result = instance.read(reg.handler)
+
+        resp = self.api.http.post(
+            f"{self.api.base_url}/v1/joblib/providers/{reg.id}/results",
+            headers=self.api.get_headers(),
+            json={"request_hash": event.request_id, "data": result},
+        )
+        self.api.raise_for_status(resp)

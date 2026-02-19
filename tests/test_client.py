@@ -11,7 +11,8 @@ from zndraw_joblib.client import (
     Extension,
     JobManager,
 )
-from zndraw_joblib.events import JoinJobRoom, LeaveJobRoom
+from zndraw_joblib.events import JoinJobRoom, LeaveJobRoom, ProviderRequest
+from zndraw_joblib.provider import Provider
 from zndraw_joblib.schemas import (
     JobResponse,
     JobSummary,
@@ -648,3 +649,98 @@ def test_job_manager_context_manager(client):
     # Worker should be deleted from server
     resp = client.patch(f"/v1/joblib/workers/{worker_id}")
     assert resp.status_code == 404
+
+
+# --- Provider request handler (ProviderRequest SIO dispatch) ---
+
+
+class FsProvider(Provider):
+    """Test provider for filesystem reads."""
+
+    category: ClassVar[str] = "filesystem"
+    path: str = "/"
+
+    def read(self, handler):
+        return handler.list_dir(self.path)
+
+
+def test_sio_handlers_registered_in_init(client):
+    """SIO handlers (ProviderRequest, TaskAvailable) registered in __init__."""
+    mock_tsio = MagicMock()
+    api = MockClientApi(client)
+    JobManager(api, tsio=mock_tsio)
+
+    # tsio.on should have been called for ProviderRequest (and TaskAvailable)
+    on_calls = [c[0][0] for c in mock_tsio.on.call_args_list]
+    assert ProviderRequest in on_calls
+
+
+def test_sio_handlers_not_registered_without_tsio(client):
+    """No error when tsio is None (no SIO handlers)."""
+    api = MockClientApi(client)
+    manager = JobManager(api)
+    assert manager.tsio is None  # Just works, no error
+
+
+def test_provider_request_handler_dispatches_read(client):
+    """ProviderRequest handler should call read() and POST result back."""
+    mock_tsio = MagicMock()
+    api = MockClientApi(client)
+    manager = JobManager(api, tsio=mock_tsio)
+
+    mock_handler = MagicMock()
+    mock_handler.list_dir.return_value = [{"name": "file.xyz", "size": 42}]
+
+    manager.register_provider(FsProvider, name="local", handler=mock_handler)
+
+    # Trigger a read via the REST endpoint to get request_hash and inflight
+    read_resp = client.get(
+        "/v1/joblib/rooms/@global/providers/@global:filesystem:local",
+        params={"path": "/data"},
+    )
+    assert read_resp.status_code == 202
+    request_hash = read_resp.json()["request_hash"]
+
+    # Capture the registered handler callback (registered in __init__)
+    pr_calls = [c for c in mock_tsio.on.call_args_list if c[0][0] is ProviderRequest]
+    callback = pr_calls[0][0][1]
+
+    # Simulate incoming ProviderRequest (as the server would dispatch)
+    event = ProviderRequest.from_dict_params(
+        request_id=request_hash,
+        provider_name="@global:filesystem:local",
+        params={"path": "/data"},
+    )
+    callback(event)
+
+    # Verify provider.read() was called with the handler
+    mock_handler.list_dir.assert_called_once_with("/data")
+
+    # Verify result is now cached on the server
+    cached_resp = client.get(
+        "/v1/joblib/rooms/@global/providers/@global:filesystem:local",
+        params={"path": "/data"},
+    )
+    assert cached_resp.status_code == 200
+    assert cached_resp.json() == [{"name": "file.xyz", "size": 42}]
+
+
+def test_provider_request_handler_ignores_unknown_provider(client):
+    """Handler should silently ignore ProviderRequest for unknown providers."""
+    mock_tsio = MagicMock()
+    api = MockClientApi(client)
+    manager = JobManager(api, tsio=mock_tsio)
+
+    manager.register_provider(FsProvider, name="local", handler=object())
+
+    # Capture callback (registered in __init__)
+    pr_calls = [c for c in mock_tsio.on.call_args_list if c[0][0] is ProviderRequest]
+    callback = pr_calls[0][0][1]
+
+    # Invoke with unknown provider name — should not raise
+    event = ProviderRequest.from_dict_params(
+        request_id="xyz",
+        provider_name="@global:filesystem:unknown",
+        params={"path": "/"},
+    )
+    callback(event)  # Should not raise
