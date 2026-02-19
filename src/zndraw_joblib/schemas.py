@@ -89,3 +89,38 @@ class PaginatedResponse(BaseModel, Generic[T]):
     total: int
     limit: int
     offset: int
+
+
+class ProviderRegisterRequest(BaseModel):
+    category: str
+    name: str
+    schema_: dict[str, Any] = Field(default={}, alias="schema")
+    worker_id: UUID | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class ProviderResponse(BaseModel):
+    id: UUID
+    room_id: str
+    category: str
+    name: str
+    full_name: str
+    schema_: dict[str, Any] = Field(alias="schema")
+    worker_id: UUID
+    created_at: datetime
+
+    model_config = {"populate_by_name": True}
+
+
+class ProviderInfoResponse(BaseModel):
+    id: UUID
+    room_id: str
+    category: str
+    name: str
+    full_name: str
+    schema_: dict[str, Any] = Field(alias="schema")
+    worker_id: UUID
+    created_at: datetime
+
+    model_config = {"populate_by_name": True}

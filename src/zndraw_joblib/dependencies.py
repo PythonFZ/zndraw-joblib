@@ -1,5 +1,7 @@
 # src/zndraw_joblib/dependencies.py
-from typing import Annotated
+import hashlib
+import json
+from typing import Annotated, Any, Protocol, runtime_checkable
 
 from fastapi import Depends, Path, Request
 from zndraw_socketio import AsyncServerWrapper
@@ -53,3 +55,40 @@ async def verify_writable_room(room_id: str = Path()) -> str:
 
 
 WritableRoomDep = Annotated[str, Depends(verify_writable_room)]
+
+
+@runtime_checkable
+class ResultBackend(Protocol):
+    """Protocol for storing and retrieving cached provider results."""
+
+    async def store(self, key: str, data: bytes, ttl: int) -> None: ...
+
+    async def get(self, key: str) -> bytes | None: ...
+
+    async def delete(self, key: str) -> None: ...
+
+    async def acquire_inflight(self, key: str, ttl: int) -> bool:
+        """Return True if lock acquired (SET NX semantics)."""
+        ...
+
+    async def release_inflight(self, key: str) -> None: ...
+
+
+async def get_result_backend() -> ResultBackend:
+    """Return the configured ResultBackend.
+
+    Host apps must override this dependency via
+    ``app.dependency_overrides[get_result_backend]``.
+    """
+    raise NotImplementedError(
+        "ResultBackend not configured — host app must override get_result_backend"
+    )
+
+
+ResultBackendDep = Annotated[ResultBackend, Depends(get_result_backend)]
+
+
+def request_hash(params: dict[str, Any]) -> str:
+    """Return a SHA-256 hex digest of the canonicalized JSON representation."""
+    canonical = json.dumps(params, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()

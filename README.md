@@ -57,6 +57,7 @@ get_session_maker (from zndraw_auth)  ← override this one dependency
 | `current_superuser` | Yes (from zndraw_auth) | Superuser access control |
 | `verify_writable_room` | Optional | Room writability guard for `register_job` and `submit_task` |
 | `get_tsio` | Optional | Socket.IO server for real-time events |
+| `get_result_backend` | **Yes** (for providers) | Result caching backend for provider reads |
 | `get_settings` | Optional | Override `JobLibSettings` defaults |
 
 **Note**: SQLite locking is handled by the host application (zndraw-fastapi). For SQLite databases, wrap the session maker with a lock in your app's lifespan context.
@@ -99,6 +100,10 @@ class JobLibSettings(BaseSettings):
     worker_timeout_seconds: int = 60
     sweeper_interval_seconds: int = 30
     long_poll_max_wait_seconds: int = 120
+
+    # Provider settings
+    provider_result_ttl_seconds: int = 300    # cached result lifetime
+    provider_inflight_ttl_seconds: int = 30   # inflight lock lifetime
 ```
 
 ## Job Naming Convention
@@ -222,7 +227,176 @@ Updates `last_heartbeat`. Workers must call periodically during execution.
 DELETE /v1/joblib/workers/{worker_id}
 ```
 
-Explicit cleanup on graceful shutdown.
+Explicit cleanup on graceful shutdown. Also cascades to any providers registered under that worker.
+
+## Providers
+
+Providers are a generic abstraction for connected Python clients to **serve data on demand**. While jobs are user-initiated computation (workers pull tasks), providers handle **server-dispatched read requests** — the server pushes a request to a specific provider and caches the result.
+
+### Providers vs Jobs
+
+| | **Jobs** | **Providers** |
+|---|---|---|
+| **Purpose** | User-initiated computation | Remote resource access |
+| **Dispatch** | Workers pull/claim (FIFO) | Server pushes to specific provider |
+| **Results** | Side effects (modify room state) | Data returned to caller (cached) |
+| **HTTP** | POST (creates task) | GET (reads resource) → 200 or 202 |
+
+### Provider Base Model
+
+Host apps define provider types by subclassing `Provider`:
+
+```python
+from zndraw_joblib import Provider
+
+class FilesystemRead(Provider):
+    category: ClassVar[str] = "filesystem"
+    path: str = "/"
+    glob: str | None = None
+
+    def read(self, handler: Any) -> Any:
+        if self.glob:
+            return handler.glob(f"{self.path}/{self.glob}")
+        return handler.ls(self.path, detail=True)
+```
+
+The JSON Schema is auto-generated from Pydantic fields and stored on registration.
+
+### Result Backend
+
+Provider reads require a `ResultBackend` for caching results and inflight coalescing. The host app **must** override `get_result_backend`:
+
+```python
+from zndraw_joblib.dependencies import get_result_backend, ResultBackend
+
+class RedisResultBackend:
+    """Implements the ResultBackend protocol using Redis."""
+
+    def __init__(self, redis):
+        self._redis = redis
+
+    async def store(self, key: str, data: bytes, ttl: int) -> None:
+        await self._redis.set(key, data, ex=ttl)
+
+    async def get(self, key: str) -> bytes | None:
+        return await self._redis.get(key)
+
+    async def delete(self, key: str) -> None:
+        await self._redis.delete(key)
+
+    async def acquire_inflight(self, key: str, ttl: int) -> bool:
+        return await self._redis.set(key, b"1", nx=True, ex=ttl)
+
+    async def release_inflight(self, key: str) -> None:
+        await self._redis.delete(key)
+
+backend = RedisResultBackend(redis)
+app.dependency_overrides[get_result_backend] = lambda: backend
+```
+
+### Provider REST Endpoints
+
+All under `/v1/joblib/`:
+
+#### Registration
+
+```
+PUT /v1/joblib/rooms/{room_id}/providers
+```
+
+Register or update a provider. Idempotent on `(room_id, category, name)`. Auto-creates a worker if `worker_id` is not provided.
+
+Request body:
+```json
+{
+  "category": "filesystem",
+  "name": "local",
+  "schema": { "path": {"type": "string"} }
+}
+```
+
+#### Listing
+
+```
+GET /v1/joblib/rooms/{room_id}/providers
+```
+
+Lists providers visible from a room (room-scoped + `@global`). Paginated.
+
+#### Provider Info
+
+```
+GET /v1/joblib/rooms/{room_id}/providers/{provider_name}/info
+```
+
+Returns provider details and JSON Schema. `provider_name` is the full name (e.g., `@global:filesystem:local`).
+
+#### Data Read
+
+```
+GET /v1/joblib/rooms/{room_id}/providers/{provider_name}?params
+```
+
+Query parameters are passed to the provider's `read()` method. `provider_name` is the full name.
+
+**Responses:**
+- `200 OK` — cached result available, returned immediately
+- `202 Accepted` — dispatched to provider, result pending. Includes `Location` and `Retry-After` headers.
+
+#### Result Upload
+
+```
+POST /v1/joblib/providers/{provider_id}/results
+```
+
+Provider worker posts read results back to the server. Stores in `ResultBackend`, clears inflight lock, emits `ProviderResultReady`.
+
+```json
+{"request_hash": "abc123...", "data": [...]}
+```
+
+#### Deletion
+
+```
+DELETE /v1/joblib/providers/{provider_id}
+```
+
+Unregister a provider. Must be owned by authenticated user or superuser.
+
+### Read Request Flow
+
+```
+1. Frontend: GET /rooms/room-42/providers/@global:filesystem:local?path=/data
+2. Server: check cache → HIT: return 200
+                        → MISS: acquire inflight, emit ProviderRequest → return 202
+3. Provider client: receives ProviderRequest via Socket.IO
+                    calls provider.read(handler)
+                    POST /providers/{id}/results
+4. Server: store in ResultBackend, emit ProviderResultReady
+5. Frontend: receives ProviderResultReady, re-fetches → 200
+```
+
+### Client SDK
+
+Provider methods are integrated into `JobManager`:
+
+```python
+with JobManager(api, tsio=tsio) as manager:
+    # Register a provider
+    provider_id = manager.register_provider(
+        FilesystemRead,
+        name="local",
+        handler=fsspec.filesystem("file"),
+        room="@global",
+    )
+
+    # Access all handlers (used during job execution)
+    print(manager.handlers)  # {"@global:filesystem:local": <LocalFileSystem>}
+
+    # Unregister by full_name
+    manager.unregister_provider("@global:filesystem:local")
+# disconnect() cleans up both providers and jobs
+```
 
 ## SQLModel
 
@@ -338,10 +512,15 @@ All models are frozen Pydantic `BaseModel`s (hashable for set-based deduplicatio
 | `JobsInvalidate` | *(none)* | `room:{room_id}` | Job registered/deleted, worker connected/disconnected |
 | `TaskAvailable` | `job_name`, `room_id`, `task_id` | `jobs:{full_name}` | Task submitted (non-`@internal` only) |
 | `TaskStatusEvent` | `id`, `name`, `room_id`, `status`, timestamps, `worker_id`, `error` | `room:{room_id}` | Any task status transition |
-| `JoinJobRoom` | `job_name`, `worker_id` | *(client → server)* | Worker joins a job's notification room after REST registration |
+| `JoinJobRoom` | `job_name`, `worker_id` | *(client → server)* | Worker joins a job's notification room |
 | `LeaveJobRoom` | `job_name`, `worker_id` | *(client → server)* | Worker leaves a job's notification room |
+| `ProvidersInvalidate` | *(none)* | `room:{room_id}` | Provider registered/deleted, worker disconnected |
+| `ProviderRequest` | `request_id`, `provider_name`, `params` | `providers:{full_name}` | Server dispatches read to provider |
+| `ProviderResultReady` | `provider_name`, `request_hash` | `room:{room_id}` | Provider result cached, frontend should refetch |
+| `JoinProviderRoom` | `provider_name`, `worker_id` | *(client → server)* | Client joins provider dispatch room |
+| `LeaveProviderRoom` | `provider_name`, `worker_id` | *(client → server)* | Client leaves provider dispatch room |
 
-Event names are auto-derived as snake_case by zndraw-socketio: `jobs_invalidate`, `task_available`, `task_status_event`, `join_job_room`, `leave_job_room`.
+Event names are auto-derived as snake_case by zndraw-socketio: `jobs_invalidate`, `task_available`, `task_status_event`, `providers_invalidate`, `provider_request`, etc.
 
 ### Worker Notification Pattern
 
@@ -458,6 +637,10 @@ class TaskNotFound(ProblemType):
 class InvalidTaskTransition(ProblemType):
     title = "Conflict"
     status = 409
+
+class ProviderNotFound(ProblemType):
+    title = "Not Found"
+    status = 404
 ```
 
 ## Client

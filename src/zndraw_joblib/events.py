@@ -8,7 +8,7 @@ of emissions via the Emission NamedTuple.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 from zndraw_socketio import AsyncServerWrapper
@@ -72,6 +72,63 @@ class LeaveJobRoom(FrozenEvent):
     """
 
     job_name: str
+    worker_id: str
+
+
+class ProvidersInvalidate(FrozenEvent):
+    """Frontend should refetch the provider list."""
+
+
+class ProviderRequest(FrozenEvent):
+    """Server dispatches a read request to a provider client."""
+
+    request_id: str
+    provider_name: str  # full_name: room_id:category:name
+    params: tuple[tuple[str, Any], ...]
+
+    @classmethod
+    def from_dict_params(
+        cls,
+        *,
+        request_id: str,
+        provider_name: str,
+        params: dict[str, Any],
+    ) -> "ProviderRequest":
+        """Create from a dict, converting params to a hashable tuple form."""
+        return cls(
+            request_id=request_id,
+            provider_name=provider_name,
+            params=tuple(sorted(params.items())),
+        )
+
+
+class ProviderResultReady(FrozenEvent):
+    """Server notifies frontend that a provider result is cached."""
+
+    provider_name: str  # full_name: room_id:category:name
+    request_hash: str
+
+
+class JoinProviderRoom(FrozenEvent):
+    """Client joins a provider dispatch room.
+
+    Sent by the client after REST provider registration. The host app's
+    socketio handler should call ``tsio.enter_room(sid, f"providers:{provider_name}")``
+    and store the ``worker_id`` in the SIO session for disconnect cleanup.
+    """
+
+    provider_name: str  # full_name: room_id:category:name
+    worker_id: str
+
+
+class LeaveProviderRoom(FrozenEvent):
+    """Client leaves a provider dispatch room.
+
+    Sent by the client on graceful disconnect or provider unregistration.
+    The host app's handler should call ``tsio.leave_room(sid, f"providers:{provider_name}")``.
+    """
+
+    provider_name: str  # full_name: room_id:category:name
     worker_id: str
 
 

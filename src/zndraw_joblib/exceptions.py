@@ -153,3 +153,10 @@ class InternalJobNotConfigured(ProblemType):
 
     title: ClassVar[str] = "Service Unavailable"
     status: ClassVar[int] = 503
+
+
+class ProviderNotFound(ProblemType):
+    """The requested provider does not exist."""
+
+    title: ClassVar[str] = "Not Found"
+    status: ClassVar[int] = 404

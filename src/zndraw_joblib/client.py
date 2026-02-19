@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, ClassVar, Generic, Iterator, Protocol, TypeVar
 from uuid import UUID
@@ -13,10 +14,17 @@ import httpx
 from pydantic import BaseModel
 from zndraw_socketio import SyncClientWrapper
 
-from zndraw_joblib.events import JoinJobRoom, LeaveJobRoom
+from zndraw_joblib.events import (
+    JoinJobRoom,
+    JoinProviderRoom,
+    LeaveJobRoom,
+    LeaveProviderRoom,
+)
 from zndraw_joblib.models import TaskStatus
+from zndraw_joblib.provider import Provider
 from zndraw_joblib.schemas import (
     JobRegisterRequest,
+    ProviderRegisterRequest,
     TaskClaimResponse,
     TaskSubmitRequest,
 )
@@ -79,6 +87,16 @@ class ClaimedTask(Generic[E]):
         self.extension = extension
 
 
+@dataclass
+class _RegisteredProvider:
+    """Internal record of a registered provider."""
+
+    id: UUID
+    cls: type[Provider]
+    handler: Any
+    room_id: str
+
+
 class JobManager:
     """Main entry point for workers. Registers jobs and claims tasks."""
 
@@ -87,6 +105,7 @@ class JobManager:
         self.tsio = tsio
         self._registry: dict[str, type[Extension]] = {}
         self._worker_id: UUID | None = None
+        self._providers: dict[str, _RegisteredProvider] = {}
 
     def __getitem__(self, key: str) -> type[Extension]:
         return self._registry[key]
@@ -109,10 +128,21 @@ class JobManager:
     def disconnect(self) -> None:
         """Gracefully disconnect the worker.
 
-        1. Emits LeaveJobRoom for each registered job (socket room cleanup)
-        2. Calls DELETE /workers/{worker_id} (DB cleanup: fail tasks, remove links, soft-delete orphan jobs)
-        3. Clears local registry state
+        1. Emits LeaveProviderRoom for each registered provider (socket room cleanup)
+        2. Emits LeaveJobRoom for each registered job (socket room cleanup)
+        3. Calls DELETE /workers/{worker_id} (DB cleanup: fail tasks, remove links, soft-delete orphan jobs)
+        4. Clears local registry state
         """
+        # Clean up providers first (before worker deletion cascades them)
+        if self.tsio is not None:
+            for full_name, reg in self._providers.items():
+                self.tsio.emit(
+                    LeaveProviderRoom(
+                        provider_name=full_name,
+                        worker_id=str(self._worker_id),
+                    )
+                )
+
         if self.tsio is not None and self._worker_id is not None:
             for job_name in self._registry:
                 self.tsio.emit(
@@ -126,6 +156,7 @@ class JobManager:
             )
             self.api.raise_for_status(resp)
 
+        self._providers.clear()
         self._registry.clear()
         self._worker_id = None
 
@@ -346,3 +377,98 @@ class JobManager:
         )
         self.api.raise_for_status(response)
         return response.json()["id"]
+
+    def register_provider(
+        self,
+        provider_cls: type[Provider],
+        *,
+        name: str,
+        handler: Any,
+        room: str = "@global",
+    ) -> UUID:
+        """Register a provider for serving read requests.
+
+        Parameters
+        ----------
+        provider_cls
+            The Provider subclass (defines category and read params schema).
+        name
+            Unique name for this provider instance (e.g., "local", "s3-bucket").
+        handler
+            The handler object passed to ``provider.read(handler)`` on dispatch.
+        room
+            ``"@global"`` or a room_id.
+
+        Returns
+        -------
+        UUID
+            The provider ID assigned by the server.
+        """
+        schema = provider_cls.model_json_schema()
+
+        request = ProviderRegisterRequest(
+            category=provider_cls.category,
+            name=name,
+            schema=schema,
+            worker_id=self._worker_id,
+        )
+
+        resp = self.api.http.put(
+            f"{self.api.base_url}/v1/joblib/rooms/{room}/providers",
+            headers=self.api.get_headers(),
+            json=request.model_dump(exclude_none=True, mode="json"),
+        )
+        self.api.raise_for_status(resp)
+
+        data = resp.json()
+        provider_id = UUID(data["id"])
+        full_name = f"{room}:{provider_cls.category}:{name}"
+
+        # Extract worker_id from response if auto-created
+        if "worker_id" in data and data["worker_id"]:
+            self._worker_id = UUID(data["worker_id"])
+
+        self._providers[full_name] = _RegisteredProvider(
+            id=provider_id,
+            cls=provider_cls,
+            handler=handler,
+            room_id=room,
+        )
+
+        if self.tsio is not None:
+            self.tsio.emit(
+                JoinProviderRoom(
+                    provider_name=full_name,
+                    worker_id=str(self._worker_id),
+                )
+            )
+
+        return provider_id
+
+    def unregister_provider(self, full_name: str) -> None:
+        """Unregister a provider by full_name (room_id:category:name)."""
+        reg = self._providers.pop(full_name, None)
+        if reg is None:
+            return
+
+        self.api.http.delete(
+            f"{self.api.base_url}/v1/joblib/providers/{reg.id}",
+            headers=self.api.get_headers(),
+        )
+
+        if self.tsio is not None:
+            self.tsio.emit(
+                LeaveProviderRoom(
+                    provider_name=full_name,
+                    worker_id=str(self._worker_id),
+                )
+            )
+
+    @property
+    def handlers(self) -> dict[str, Any]:
+        """All registered provider handlers keyed by full_name.
+
+        Used by job execution — the full dict is passed to Extension.run()
+        so the Extension can look up the right handler by provider full_name.
+        """
+        return {full_name: reg.handler for full_name, reg in self._providers.items()}

@@ -16,3 +16,7 @@ class JobLibSettings(BaseSettings):
 
     # Internal taskiq worker settings
     internal_task_timeout_seconds: int = 3600  # 1 hour
+
+    # Provider settings
+    provider_result_ttl_seconds: int = 300
+    provider_inflight_ttl_seconds: int = 30

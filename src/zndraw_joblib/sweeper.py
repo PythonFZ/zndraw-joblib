@@ -16,11 +16,13 @@ from zndraw_socketio import AsyncServerWrapper
 from zndraw_joblib.events import (
     Emission,
     JobsInvalidate,
+    ProvidersInvalidate,
     build_task_status_emission,
     emit,
 )
 from zndraw_joblib.models import (
     Job,
+    ProviderRecord,
     Task,
     TaskStatus,
     Worker,
@@ -124,6 +126,18 @@ async def cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission]
     # Emit JobsInvalidate for all affected rooms (worker count changed)
     for room_id in set(job_rooms.values()):
         emissions.add(Emission(JobsInvalidate(), f"room:{room_id}"))
+
+    # Delete providers owned by this worker
+    result = await session.execute(
+        select(ProviderRecord).where(ProviderRecord.worker_id == worker.id)
+    )
+    providers = result.scalars().all()
+    provider_rooms: set[str] = set()
+    for provider in providers:
+        provider_rooms.add(provider.room_id)
+        await session.delete(provider)
+    for room_id in provider_rooms:
+        emissions.add(Emission(ProvidersInvalidate(), f"room:{room_id}"))
 
     # Delete all links
     for link in links:

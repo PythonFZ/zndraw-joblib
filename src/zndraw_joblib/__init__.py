@@ -4,18 +4,27 @@
 from zndraw_joblib.client import Category, ClaimedTask, Extension, JobManager
 from zndraw_joblib.dependencies import (
     JobLibSettingsDep,
+    ResultBackend,
+    ResultBackendDep,
     WritableRoomDep,
     get_joblib_settings,
+    get_result_backend,
     get_tsio,
+    request_hash,
     validate_room_id,
     verify_writable_room,
 )
 from zndraw_joblib.events import (
     Emission,
     FrozenEvent,
-    JobsInvalidate,
     JoinJobRoom,
+    JoinProviderRoom,
+    JobsInvalidate,
     LeaveJobRoom,
+    LeaveProviderRoom,
+    ProviderRequest,
+    ProviderResultReady,
+    ProvidersInvalidate,
     TaskAvailable,
     TaskStatusEvent,
     build_task_status_emission,
@@ -29,12 +38,21 @@ from zndraw_joblib.exceptions import (
     InvalidTaskTransition,
     JobNotFound,
     ProblemException,
+    ProviderNotFound,
     SchemaConflict,
     TaskNotFound,
     WorkerNotFound,
     problem_exception_handler,
 )
-from zndraw_joblib.models import Job, Task, TaskStatus, Worker, WorkerJobLink
+from zndraw_joblib.models import (
+    Job,
+    ProviderRecord,
+    Task,
+    TaskStatus,
+    Worker,
+    WorkerJobLink,
+)
+from zndraw_joblib.provider import Provider
 from zndraw_joblib.registry import (
     InternalExecutor,
     InternalRegistry,
@@ -60,10 +78,17 @@ __all__ = [
     "Task",
     "WorkerJobLink",
     "TaskStatus",
+    "ProviderRecord",
+    # Provider
+    "Provider",
     # Dependencies
     "get_joblib_settings",
     "JobLibSettingsDep",
     "get_tsio",
+    "get_result_backend",
+    "ResultBackend",
+    "ResultBackendDep",
+    "request_hash",
     "verify_writable_room",
     "WritableRoomDep",
     "validate_room_id",
@@ -79,6 +104,7 @@ __all__ = [
     "InvalidRoomId",
     "Forbidden",
     "InternalJobNotConfigured",
+    "ProviderNotFound",
     # Schemas
     "PaginatedResponse",
     # Settings
@@ -101,10 +127,15 @@ __all__ = [
     # Events
     "FrozenEvent",
     "JobsInvalidate",
+    "ProvidersInvalidate",
+    "ProviderRequest",
+    "ProviderResultReady",
     "TaskAvailable",
     "TaskStatusEvent",
     "JoinJobRoom",
     "LeaveJobRoom",
+    "JoinProviderRoom",
+    "LeaveProviderRoom",
     "Emission",
     "build_task_status_emission",
     "emit",

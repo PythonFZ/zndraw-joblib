@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 from zndraw_auth import Base, User
 
+from zndraw_joblib.dependencies import get_result_backend
 from zndraw_joblib.exceptions import ProblemException, problem_exception_handler
 from zndraw_joblib.router import router
 from zndraw_joblib.settings import JobLibSettings
@@ -88,6 +89,32 @@ def mock_current_user(test_user):
     return get_current_user
 
 
+class InMemoryResultBackend:
+    """In-memory result backend for testing."""
+
+    def __init__(self):
+        self._store: dict[str, bytes] = {}
+        self._inflight: set[str] = set()
+
+    async def store(self, key: str, data: bytes, ttl: int) -> None:
+        self._store[key] = data
+
+    async def get(self, key: str) -> bytes | None:
+        return self._store.get(key)
+
+    async def delete(self, key: str) -> None:
+        self._store.pop(key, None)
+
+    async def acquire_inflight(self, key: str, ttl: int) -> bool:
+        if key in self._inflight:
+            return False
+        self._inflight.add(key)
+        return True
+
+    async def release_inflight(self, key: str) -> None:
+        self._inflight.discard(key)
+
+
 def _build_app(
     *,
     session_maker,
@@ -104,6 +131,8 @@ def _build_app(
     app.dependency_overrides[current_active_user] = current_user
     app.dependency_overrides[current_superuser] = current_user
     app.state.joblib_settings = JobLibSettings()
+    result_backend = InMemoryResultBackend()
+    app.dependency_overrides[get_result_backend] = lambda: result_backend
     return app
 
 

@@ -96,9 +96,42 @@ class Worker(Base):
         back_populates="workers", secondary="worker_job_link", passive_deletes=True
     )
     tasks: Mapped[list["Task"]] = relationship(back_populates="worker")
+    providers: Mapped[list["ProviderRecord"]] = relationship(back_populates="worker")
 
     def is_alive(self, threshold: timedelta) -> bool:
         return datetime.now(timezone.utc) - self.last_heartbeat < threshold
+
+
+class ProviderRecord(Base):
+    __tablename__ = "provider"
+    __table_args__ = (
+        UniqueConstraint("room_id", "category", "name", name="unique_provider"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    room_id: Mapped[str] = mapped_column(String, index=True)
+    category: Mapped[str] = mapped_column(String, index=True)
+    name: Mapped[str] = mapped_column(String, index=True)
+    schema_: Mapped[dict[str, Any]] = mapped_column("schema", JSON, default=dict)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), index=True
+    )
+    worker_id: Mapped[UUID] = mapped_column(
+        ForeignKey("worker.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        index=True,
+    )
+
+    # Relationships
+    worker: Mapped[Optional["Worker"]] = relationship(back_populates="providers")
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.room_id}:{self.category}:{self.name}"
 
 
 class Task(Base):

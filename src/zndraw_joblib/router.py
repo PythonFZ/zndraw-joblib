@@ -1,5 +1,6 @@
 # src/zndraw_joblib/router.py
 import asyncio
+import json
 import logging
 import random
 import re
@@ -7,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -18,14 +19,19 @@ from zndraw_socketio import AsyncServerWrapper
 
 from zndraw_joblib.dependencies import (
     JobLibSettingsDep,
+    ResultBackendDep,
     WritableRoomDep,
     get_internal_registry,
     get_tsio,
+    request_hash,
     validate_room_id,
 )
 from zndraw_joblib.events import (
     Emission,
     JobsInvalidate,
+    ProviderRequest,
+    ProviderResultReady,
+    ProvidersInvalidate,
     TaskAvailable,
     build_task_status_emission,
     emit,
@@ -36,6 +42,7 @@ from zndraw_joblib.exceptions import (
     InvalidCategory,
     InvalidTaskTransition,
     JobNotFound,
+    ProviderNotFound,
     SchemaConflict,
     TaskNotFound,
     WorkerNotFound,
@@ -43,6 +50,7 @@ from zndraw_joblib.exceptions import (
 from zndraw_joblib.models import (
     TERMINAL_STATUSES,
     Job,
+    ProviderRecord,
     Task,
     TaskStatus,
     Worker,
@@ -54,6 +62,9 @@ from zndraw_joblib.schemas import (
     JobResponse,
     JobSummary,
     PaginatedResponse,
+    ProviderInfoResponse,
+    ProviderRegisterRequest,
+    ProviderResponse,
     TaskClaimRequest,
     TaskClaimResponse,
     TaskResponse,
@@ -913,3 +924,336 @@ async def delete_worker(
     emissions = await cleanup_worker(session, worker)
     await session.commit()
     await emit(tsio, emissions)
+
+
+# ---------------------------------------------------------------------------
+# Provider endpoints
+# ---------------------------------------------------------------------------
+
+
+def _room_provider_filter(room_id: str):
+    """Build a SQLAlchemy filter for providers visible from a given room."""
+    if room_id == "@global":
+        return ProviderRecord.room_id == "@global"
+    return ProviderRecord.room_id.in_(["@global", room_id])
+
+
+async def _resolve_provider(
+    session: AsyncSession, provider_name: str, room_id: str
+) -> ProviderRecord:
+    """Resolve a provider full_name into a ProviderRecord, checking room visibility."""
+    parts = provider_name.split(":", 2)
+    if len(parts) != 3:
+        raise ProviderNotFound.exception(
+            detail=f"Invalid provider name format: {provider_name}"
+        )
+    provider_room_id, category, name = parts
+
+    # Visibility check: provider must be in the room or @global
+    if room_id not in ("@global",) and provider_room_id not in (
+        "@global",
+        room_id,
+    ):
+        raise ProviderNotFound.exception(
+            detail=f"Provider '{provider_name}' not accessible from room '{room_id}'"
+        )
+
+    result = await session.execute(
+        select(ProviderRecord).where(
+            ProviderRecord.room_id == provider_room_id,
+            ProviderRecord.category == category,
+            ProviderRecord.name == name,
+        )
+    )
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise ProviderNotFound.exception(detail=f"Provider '{provider_name}' not found")
+    return provider
+
+
+@router.put(
+    "/rooms/{room_id}/providers",
+    response_model=ProviderResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def register_provider(
+    room_id: str,
+    request: ProviderRegisterRequest,
+    response: Response,
+    session: SessionDep,
+    user: CurrentUserDep,
+    tsio: TsioDep,
+):
+    """Register or update a provider. Idempotent on (room_id, category, name)."""
+    validate_room_id(room_id)
+
+    # Handle worker: use provided worker_id or auto-create
+    if request.worker_id:
+        result = await session.execute(
+            select(Worker).where(
+                Worker.id == request.worker_id,
+                Worker.user_id == user.id,
+            )
+        )
+        worker = result.scalar_one_or_none()
+        if not worker:
+            raise WorkerNotFound.exception(
+                detail=f"Worker '{request.worker_id}' not found or not owned by user"
+            )
+    else:
+        worker = Worker(user_id=user.id)
+        session.add(worker)
+        await session.flush()
+
+    # Check if provider already exists (upsert)
+    result = await session.execute(
+        select(ProviderRecord).where(
+            ProviderRecord.category == request.category,
+            ProviderRecord.name == request.name,
+            ProviderRecord.room_id == room_id,
+        )
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.schema_ = request.schema_
+        existing.worker_id = worker.id
+        existing.user_id = user.id
+        provider = existing
+        response.status_code = status.HTTP_200_OK
+    else:
+        provider = ProviderRecord(
+            category=request.category,
+            name=request.name,
+            room_id=room_id,
+            schema_=request.schema_,
+            user_id=user.id,
+            worker_id=worker.id,
+        )
+        session.add(provider)
+
+    await session.commit()
+    await session.refresh(provider)
+    await emit(tsio, {Emission(ProvidersInvalidate(), f"room:{provider.room_id}")})
+
+    return ProviderResponse(
+        id=provider.id,
+        room_id=provider.room_id,
+        category=provider.category,
+        name=provider.name,
+        full_name=provider.full_name,
+        schema=provider.schema_,
+        worker_id=provider.worker_id,
+        created_at=provider.created_at,
+    )
+
+
+@router.get(
+    "/rooms/{room_id}/providers",
+    response_model=PaginatedResponse[ProviderResponse],
+)
+async def list_providers(
+    room_id: str,
+    session: SessionDep,
+    limit: int = Query(default=50, ge=0, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    """List providers visible from a room (room-scoped + @global)."""
+    validate_room_id(room_id)
+
+    base_query = select(ProviderRecord).where(_room_provider_filter(room_id))
+
+    total_result = await session.execute(
+        select(func.count()).select_from(base_query.subquery())
+    )
+    total = total_result.scalar()
+
+    result = await session.execute(
+        base_query.order_by(ProviderRecord.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    providers = result.scalars().all()
+
+    items = [
+        ProviderResponse(
+            id=p.id,
+            room_id=p.room_id,
+            category=p.category,
+            name=p.name,
+            full_name=p.full_name,
+            schema=p.schema_,
+            worker_id=p.worker_id,
+            created_at=p.created_at,
+        )
+        for p in providers
+    ]
+    return PaginatedResponse(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get(
+    "/rooms/{room_id}/providers/{provider_name:path}/info",
+    response_model=ProviderInfoResponse,
+)
+async def get_provider_info(
+    room_id: str,
+    provider_name: str,
+    session: SessionDep,
+):
+    """Get provider details and JSON Schema."""
+    validate_room_id(room_id)
+    provider = await _resolve_provider(session, provider_name, room_id)
+
+    return ProviderInfoResponse(
+        id=provider.id,
+        room_id=provider.room_id,
+        category=provider.category,
+        name=provider.name,
+        full_name=provider.full_name,
+        schema=provider.schema_,
+        worker_id=provider.worker_id,
+        created_at=provider.created_at,
+    )
+
+
+@router.get("/rooms/{room_id}/providers/{provider_name:path}")
+async def read_provider(
+    room_id: str,
+    provider_name: str,
+    request: Request,
+    response: Response,
+    session: SessionDep,
+    result_backend: ResultBackendDep,
+    settings: SettingsDep,
+    tsio: TsioDep,
+):
+    """Read data from a provider. Returns 200 if cached, 202 if dispatched."""
+    validate_room_id(room_id)
+    provider = await _resolve_provider(session, provider_name, room_id)
+
+    # Extract query params (exclude path params)
+    params = dict(request.query_params)
+    rhash = request_hash(params)
+
+    # Build cache key using full_name
+    cache_key = f"provider-result:{provider.full_name}:{rhash}"
+    inflight_key = f"provider-inflight:{provider.full_name}:{rhash}"
+
+    # Check cache
+    cached = await result_backend.get(cache_key)
+    if cached is not None:
+        return Response(
+            content=cached,
+            media_type="application/json",
+            status_code=200,
+        )
+
+    # Check / acquire inflight lock
+    acquired = await result_backend.acquire_inflight(
+        inflight_key, settings.provider_inflight_ttl_seconds
+    )
+
+    if acquired:
+        # Dispatch to provider via Socket.IO
+        provider_room = f"providers:{provider.full_name}"
+        await emit(
+            tsio,
+            {
+                Emission(
+                    ProviderRequest.from_dict_params(
+                        request_id=rhash,
+                        provider_name=provider.full_name,
+                        params=params,
+                    ),
+                    provider_room,
+                )
+            },
+        )
+
+    # Return 202 regardless of whether we dispatched or someone else did
+    response.status_code = status.HTTP_202_ACCEPTED
+    response.headers["Location"] = str(request.url)
+    response.headers["Retry-After"] = "2"
+    return {"status": "pending", "request_hash": rhash}
+
+
+@router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_provider(
+    provider_id: UUID,
+    session: SessionDep,
+    user: CurrentUserDep,
+    tsio: TsioDep,
+):
+    """Unregister a provider. Must be owned by authenticated user or superuser."""
+    result = await session.execute(
+        select(ProviderRecord).where(ProviderRecord.id == provider_id)
+    )
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise ProviderNotFound.exception(detail=f"Provider '{provider_id}' not found")
+
+    if provider.user_id != user.id and not user.is_superuser:
+        raise Forbidden.exception(detail="Provider belongs to different user")
+
+    room_id = provider.room_id
+    await session.delete(provider)
+    await session.commit()
+    await emit(tsio, {Emission(ProvidersInvalidate(), f"room:{room_id}")})
+
+
+@router.post(
+    "/providers/{provider_id}/results",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def upload_provider_result(
+    provider_id: UUID,
+    request: Request,
+    session: SessionDep,
+    user: CurrentUserDep,
+    result_backend: ResultBackendDep,
+    settings: SettingsDep,
+    tsio: TsioDep,
+):
+    """Provider worker uploads a read result."""
+    result = await session.execute(
+        select(ProviderRecord).where(ProviderRecord.id == provider_id)
+    )
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise ProviderNotFound.exception(detail=f"Provider '{provider_id}' not found")
+
+    if provider.user_id != user.id and not user.is_superuser:
+        raise Forbidden.exception(
+            detail="Not authorized to upload results for this provider"
+        )
+
+    body = await request.json()
+    rhash = body["request_hash"]
+    data = body["data"]
+
+    cache_key = f"provider-result:{provider.full_name}:{rhash}"
+    inflight_key = f"provider-inflight:{provider.full_name}:{rhash}"
+
+    # Store result
+    await result_backend.store(
+        cache_key,
+        json.dumps(data).encode(),
+        settings.provider_result_ttl_seconds,
+    )
+
+    # Release inflight lock
+    await result_backend.release_inflight(inflight_key)
+
+    # Notify frontend
+    await emit(
+        tsio,
+        {
+            Emission(
+                ProviderResultReady(
+                    provider_name=provider.full_name,
+                    request_hash=rhash,
+                ),
+                f"room:{provider.room_id}",
+            )
+        },
+    )
