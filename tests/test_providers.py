@@ -370,6 +370,45 @@ def test_upload_result_forbidden_other_user(client_factory):
     assert upload_resp.status_code == 403
 
 
+def test_register_provider_forbidden_other_user(client_factory):
+    """User B cannot overwrite user A's provider registration."""
+    alice = client_factory("alice", is_superuser=False)
+    bob = client_factory("bob", is_superuser=False)
+
+    # Alice registers a provider in a room
+    resp = alice.put(
+        "/v1/joblib/rooms/room-42/providers",
+        json={"category": "filesystem", "name": "local", "schema": {}},
+    )
+    assert resp.status_code == 201
+
+    # Bob tries to register the same provider name -> should be rejected
+    resp = bob.put(
+        "/v1/joblib/rooms/room-42/providers",
+        json={"category": "filesystem", "name": "local", "schema": {}},
+    )
+    assert resp.status_code == 403
+
+
+def test_register_provider_superuser_can_overwrite(client_factory):
+    """Superuser can overwrite another user's provider registration."""
+    alice = client_factory("alice", is_superuser=False)
+    admin = client_factory("admin", is_superuser=True)
+
+    resp = alice.put(
+        "/v1/joblib/rooms/room-42/providers",
+        json={"category": "filesystem", "name": "local", "schema": {}},
+    )
+    assert resp.status_code == 201
+
+    # Admin can overwrite
+    resp = admin.put(
+        "/v1/joblib/rooms/room-42/providers",
+        json={"category": "filesystem", "name": "local", "schema": {}},
+    )
+    assert resp.status_code == 200
+
+
 def test_register_global_provider_requires_superuser(client_factory):
     """Non-superusers cannot register @global providers."""
     normal = client_factory("normal-user", is_superuser=False)

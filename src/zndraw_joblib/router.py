@@ -1027,6 +1027,10 @@ async def register_provider(
     existing = result.scalar_one_or_none()
 
     if existing:
+        if existing.user_id != user.id and not user.is_superuser:
+            raise Forbidden.exception(
+                detail="Provider already registered by another user"
+            )
         existing.schema_ = request.schema_
         existing.content_type = request.content_type
         existing.worker_id = worker.id
