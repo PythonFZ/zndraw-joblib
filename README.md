@@ -1,11 +1,10 @@
 # ZnDraw Job Management Library
 
-A self-contained FastAPI package for distributed job/task management with SQL persistence.
+A self-contained FastAPI package for distributed job/task management with SQL persistence. Provides a pluggable router, ORM models, a client SDK with auto-serve, provider-based data reads, and server-side taskiq workers.
 
 ## Integration into your APP
 
 ```python
-# main.py
 from fastapi import FastAPI
 from zndraw_auth import current_active_user, current_superuser
 from zndraw_auth.db import get_session_maker
@@ -45,9 +44,9 @@ settings = JobLibSettings()
 All database access flows through `zndraw_auth.db.get_session_maker`:
 
 ```
-get_session_maker (from zndraw_auth)  ← override this one dependency
-  ├─ SessionDep (regular endpoints)
-  └─ SessionMakerDep (long-polling endpoints)
+get_session_maker (from zndraw_auth)  <- override this one dependency
+  +- SessionDep (regular endpoints)
+  +- SessionMakerDep (long-polling endpoints)
 ```
 
 | Dependency | Override? | Purpose |
@@ -60,7 +59,7 @@ get_session_maker (from zndraw_auth)  ← override this one dependency
 | `get_result_backend` | **Yes** (for providers) | Result caching backend for provider reads |
 | `get_settings` | Optional | Override `JobLibSettings` defaults |
 
-**Note**: SQLite locking is handled by the host application (zndraw-fastapi). For SQLite databases, wrap the session maker with a lock in your app's lifespan context.
+**Note**: SQLite locking is handled by the host application. For SQLite databases, wrap the session maker with a lock in your app's lifespan context.
 
 ### Room Writability Guard
 
@@ -80,7 +79,6 @@ async def get_writable_room(
     room = await verify_room(session, room_id)
     if room.locked and not current_user.is_superuser:
         raise HTTPException(status_code=423, detail="Room is locked")
-    # ... additional checks (edit lock, etc.) ...
     return room_id
 
 app.dependency_overrides[verify_writable_room] = get_writable_room
@@ -92,19 +90,18 @@ Read endpoints and existing task/worker operations (updates, heartbeats, disconn
 
 Settings via environment variables with `ZNDRAW_JOBLIB_` prefix:
 
-```python
-class JobLibSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="ZNDRAW_JOBLIB_")
-
-    allowed_categories: list[str] = ["modifiers", "selections", "analysis"]
-    worker_timeout_seconds: int = 60
-    sweeper_interval_seconds: int = 30
-    long_poll_max_wait_seconds: int = 120
-
-    # Provider settings
-    provider_result_ttl_seconds: int = 300    # cached result lifetime
-    provider_inflight_ttl_seconds: int = 30   # inflight lock lifetime
-```
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ZNDRAW_JOBLIB_ALLOWED_CATEGORIES` | `["modifiers", "selections", "analysis"]` | Valid job categories |
+| `ZNDRAW_JOBLIB_WORKER_TIMEOUT_SECONDS` | `60` | Stale heartbeat threshold |
+| `ZNDRAW_JOBLIB_SWEEPER_INTERVAL_SECONDS` | `30` | Sweeper cycle interval |
+| `ZNDRAW_JOBLIB_LONG_POLL_MAX_WAIT_SECONDS` | `60` | Max long-poll wait |
+| `ZNDRAW_JOBLIB_CLAIM_MAX_ATTEMPTS` | `10` | Retries for concurrent claim contention |
+| `ZNDRAW_JOBLIB_CLAIM_BASE_DELAY_SECONDS` | `0.01` | Exponential backoff base delay |
+| `ZNDRAW_JOBLIB_INTERNAL_TASK_TIMEOUT_SECONDS` | `3600` | Timeout for stuck `@internal` tasks |
+| `ZNDRAW_JOBLIB_ALLOWED_PROVIDER_CATEGORIES` | `None` (unrestricted) | Valid provider categories |
+| `ZNDRAW_JOBLIB_PROVIDER_RESULT_TTL_SECONDS` | `300` | Cached provider result lifetime |
+| `ZNDRAW_JOBLIB_PROVIDER_INFLIGHT_TTL_SECONDS` | `30` | Inflight lock lifetime |
 
 ## Job Naming Convention
 
@@ -112,139 +109,120 @@ Jobs use the format: `<room_id>:<category>:<name>`
 
 - `@global:modifiers:Rotate` - global job available to all rooms
 - `room_123:modifiers:Rotate` - private job for room_123 only
+- `@internal:modifiers:Rotate` - server-side job executed via taskiq
 
 **Validation rules:**
-- `room_id` cannot contain `@` (reserved for `@global`) or `:` (delimiter)
+- `room_id` cannot contain `@` (reserved for `@global`/`@internal`) or `:` (delimiter)
 - `category` must be in `settings.allowed_categories`
 - Same job name in same room: schema must match (409 Conflict otherwise)
 - Different rooms can have same job name with different schemas
 
-## REST Endpoints
+## Client SDK
 
-All endpoints prefixed with `/v1/joblib` (hardcoded in router).
+The `JobManager` is the main entry point for Python workers. It handles job registration, task claiming, provider dispatch, and background lifecycle management.
 
-### Job Registration
+### Basic Usage
 
-```
-PUT /v1/joblib/rooms/{room_id}/jobs
-```
+```python
+from zndraw_joblib import JobManager, Extension, Category
 
-Register a job for a room. Use `@global` as `room_id` for global jobs.
+# Auto-serve mode: background threads claim and execute tasks
+with JobManager(api, tsio=tsio, execute=my_execute) as manager:
+    @manager.register
+    class Rotate(Extension):
+        category: ClassVar[Category] = Category.MODIFIER
+        angle: float = 0.0
 
-Request body:
-```json
-{
-  "category": "modifiers",
-  "name": "Rotate",
-  "schema": { ... }
-}
-```
+        def run(self, vis, **kwargs):
+            # modify vis based on self.angle
+            pass
 
-- `@global` registration requires admin (`get_is_admin`)
-- Re-registering validates schema match (409 if mismatch)
-- Creates Worker and WorkerJobLink if not exists
-
-### Job Listing
-
-```
-GET /v1/joblib/rooms/{room_id}/jobs     # room + @global jobs
-GET /v1/joblib/rooms/@global/jobs       # only global jobs
+    manager.wait()  # blocks until SIGINT/SIGTERM or disconnect()
+# disconnect() called automatically: threads joined, worker deleted
 ```
 
-### Job Details
+### Extension Classes
 
-```
-GET /v1/joblib/rooms/{room_id}/jobs/{job_name}
+Extensions are Pydantic models with a `category` ClassVar and a `run()` method:
+
+```python
+from typing import ClassVar, Any
+from zndraw_joblib import Extension, Category
+
+class Rotate(Extension):
+    category: ClassVar[Category] = Category.MODIFIER  # or SELECTION, ANALYSIS
+    angle: float = 0.0
+    axis: str = "z"
+
+    def run(self, vis: Any, **kwargs: Any) -> None:
+        # Implementation here
+        pass
 ```
 
-`job_name` format: `<room_id>:<category>:<name>`
+The JSON Schema is auto-generated from Pydantic fields and sent to the server on registration.
+
+### Auto-Serve Mode
+
+When an `execute` callback is provided, `JobManager` runs background threads that automatically claim and execute tasks:
+
+```python
+from zndraw_joblib import JobManager, ClaimedTask
+
+def execute(task: ClaimedTask) -> None:
+    """Called for each claimed task."""
+    task.extension.run(vis)
+
+manager = JobManager(
+    api,
+    tsio=tsio,
+    execute=execute,
+    polling_interval=2.0,      # how often to poll for tasks (seconds)
+    heartbeat_interval=30.0,   # heartbeat frequency (seconds)
+)
+```
+
+Background threads start on the first `register()` or `register_provider()` call:
+- **Heartbeat thread** - periodic keep-alives to prevent sweeper cleanup
+- **Claim loop thread** - polls for tasks, calls `execute`, marks completed/failed
+
+The lifecycle is fully managed: `start()` is called before execute, `complete()` or `fail()` after. Exceptions in `execute` mark the task as failed with the error message.
+
+### Manual Mode
+
+Without `execute`, tasks must be claimed and processed manually:
+
+```python
+manager = JobManager(api, tsio=tsio)
+
+@manager.register
+class Rotate(Extension):
+    category: ClassVar[Category] = Category.MODIFIER
+    angle: float = 0.0
+    def run(self, vis, **kwargs): ...
+
+# Manual claim-execute loop
+for task in manager.listen(polling_interval=2.0):
+    manager.start(task)
+    try:
+        task.extension.run(vis)
+        manager.complete(task)
+    except Exception as e:
+        manager.fail(task, str(e))
+```
 
 ### Task Submission
 
-```
-POST /v1/joblib/rooms/{room_id}/tasks/{job_name}
-```
-
-Returns `202 Accepted` with `Location` header pointing to task status.
-
-Request body:
-```json
-{
-  "payload": { "angle": 90 }
-}
+```python
+task_id = manager.submit(
+    Rotate(angle=90.0),
+    room="room_123",
+    job_room="@global",  # room where the job is registered
+)
 ```
 
-### Task Claim (Worker)
+### Provider Registration
 
-```
-POST /v1/joblib/tasks/claim
-```
-
-Claims oldest pending task (FIFO) across all jobs the worker is registered for:
-
-```sql
-SELECT task.* FROM task
-JOIN worker_job_link ON task.job_id = worker_job_link.job_id
-WHERE worker_job_link.worker_id = :worker_id
-  AND task.status = 'pending'
-ORDER BY task.created_at ASC
-LIMIT 1
-FOR UPDATE SKIP LOCKED
-```
-
-### Task Status
-
-```
-GET /v1/joblib/tasks/{task_id}
-```
-
-Supports long-polling via `Prefer: wait=N` header (max 120s). Returns immediately on terminal states.
-
-### Task Update
-
-```
-PATCH /v1/joblib/tasks/{task_id}
-```
-
-Valid transitions:
-- `pending` → `claimed` (via `/claim`)
-- `claimed` → `running`
-- `running` → `completed` | `failed`
-- Any → `cancelled`
-
-
-### Worker Heartbeat
-
-```
-PATCH /v1/joblib/workers/{worker_id}
-```
-
-Updates `last_heartbeat`. Workers must call periodically during execution.
-
-### Worker Deletion
-
-```
-DELETE /v1/joblib/workers/{worker_id}
-```
-
-Explicit cleanup on graceful shutdown. Also cascades to any providers registered under that worker.
-
-## Providers
-
-Providers are a generic abstraction for connected Python clients to **serve data on demand**. While jobs are user-initiated computation (workers pull tasks), providers handle **server-dispatched read requests** — the server pushes a request to a specific provider and caches the result.
-
-### Providers vs Jobs
-
-| | **Jobs** | **Providers** |
-|---|---|---|
-| **Purpose** | User-initiated computation | Remote resource access |
-| **Dispatch** | Workers pull/claim (FIFO) | Server pushes to specific provider |
-| **Results** | Side effects (modify room state) | Data returned to caller (cached) |
-| **HTTP** | POST (creates task) | GET (reads resource) → 200 or 202 |
-
-### Provider Base Model
-
-Host apps define provider types by subclassing `Provider`:
+Providers handle server-dispatched read requests (see [Providers](#providers)):
 
 ```python
 from zndraw_joblib import Provider
@@ -252,26 +230,131 @@ from zndraw_joblib import Provider
 class FilesystemRead(Provider):
     category: ClassVar[str] = "filesystem"
     path: str = "/"
-    glob: str | None = None
 
-    def read(self, handler: Any) -> Any:
-        if self.glob:
-            return handler.glob(f"{self.path}/{self.glob}")
+    def read(self, handler):
         return handler.ls(self.path, detail=True)
+
+manager.register_provider(
+    FilesystemRead,
+    name="local",
+    handler=fsspec.filesystem("file"),
+    room="@global",
+)
+
+# Access handlers during job execution
+print(manager.handlers)  # {"@global:filesystem:local": <LocalFileSystem>}
 ```
 
-The JSON Schema is auto-generated from Pydantic fields and stored on registration.
+### Lifecycle Management
+
+```python
+# Context manager (recommended)
+with JobManager(api, execute=execute) as manager:
+    # ... register jobs/providers ...
+    manager.wait()  # blocks until disconnect
+
+# Manual lifecycle
+manager = JobManager(api, execute=execute)
+# ... register jobs/providers ...
+manager.disconnect()  # idempotent, safe to call multiple times
+```
+
+`disconnect()` is idempotent and handles:
+1. Signaling background threads to stop
+2. Joining all threads (waits for in-flight tasks to finish)
+3. Emitting `LeaveJobRoom`/`LeaveProviderRoom` events
+4. Calling `DELETE /workers/{id}` for server-side cleanup
+
+Signal handlers (SIGINT/SIGTERM) call `disconnect()` automatically.
+
+## REST Endpoints
+
+All endpoints prefixed with `/v1/joblib`.
+
+### Workers
+
+```
+POST   /workers                         # Create worker (201)
+GET    /workers                         # List workers (paginated)
+PATCH  /workers/{worker_id}             # Heartbeat
+DELETE /workers/{worker_id}             # Delete + cascade cleanup (204)
+```
+
+### Jobs
+
+```
+PUT    /rooms/{room_id}/jobs            # Register job (idempotent, 201/200)
+GET    /rooms/{room_id}/jobs            # List jobs (room + @global, paginated)
+GET    /rooms/{room_id}/jobs/{job_name} # Job details
+GET    /rooms/{room_id}/jobs/{job_name}/tasks  # Tasks for job (paginated)
+```
+
+### Tasks
+
+```
+POST   /rooms/{room_id}/tasks/{job_name}  # Submit task (202 Accepted)
+POST   /tasks/claim                        # Claim oldest pending (FIFO)
+GET    /tasks/{task_id}                    # Status (supports Prefer: wait=N)
+PATCH  /tasks/{task_id}                    # Update status
+GET    /rooms/{room_id}/tasks              # List room tasks (paginated)
+```
+
+### Task Lifecycle
+
+```
+PENDING -> CLAIMED -> RUNNING -> COMPLETED
+                              -> FAILED
+                   -> CANCELLED
+         -> CANCELLED
+```
+
+Claiming uses optimistic locking with exponential backoff for concurrent safety.
+
+Long-polling: `GET /tasks/{id}` with `Prefer: wait=N` header (max `long_poll_max_wait_seconds`). Returns immediately on terminal states.
+
+## Providers
+
+Providers are a generic abstraction for connected Python clients to **serve data on demand**. While jobs are user-initiated computation (workers pull tasks), providers handle **server-dispatched read requests** with result caching.
+
+| | **Jobs** | **Providers** |
+|---|---|---|
+| **Purpose** | User-initiated computation | Remote resource access |
+| **Dispatch** | Workers pull/claim (FIFO) | Server pushes to specific provider |
+| **Results** | Side effects (modify room state) | Data returned to caller (cached) |
+| **HTTP** | POST (creates task) | GET (reads resource) -> 200 or 202 |
+
+### Provider Endpoints
+
+```
+PUT    /rooms/{room_id}/providers                        # Register (201/200)
+GET    /rooms/{room_id}/providers                        # List (paginated)
+GET    /rooms/{room_id}/providers/{name}/info             # Schema + metadata
+GET    /rooms/{room_id}/providers/{name}?params           # Read (200 cached / 202 dispatched)
+POST   /providers/{provider_id}/results                   # Upload result (204)
+DELETE /providers/{provider_id}                            # Unregister (204)
+```
+
+### Read Request Flow
+
+```
+1. Frontend: GET /rooms/room-42/providers/@global:filesystem:local?path=/data
+2. Server:   check cache -> HIT: return 200
+                         -> MISS: acquire inflight, emit ProviderRequest -> return 202
+3. Client:   receives ProviderRequest via Socket.IO
+             calls provider.read(handler)
+             POST /providers/{id}/results
+4. Server:   store in ResultBackend, emit ProviderResultReady
+5. Frontend: receives ProviderResultReady, re-fetches -> 200
+```
 
 ### Result Backend
 
-Provider reads require a `ResultBackend` for caching results and inflight coalescing. The host app **must** override `get_result_backend`:
+Provider reads require a `ResultBackend` for caching and inflight coalescing. The host app **must** override `get_result_backend`:
 
 ```python
-from zndraw_joblib.dependencies import get_result_backend, ResultBackend
+from zndraw_joblib.dependencies import get_result_backend
 
 class RedisResultBackend:
-    """Implements the ResultBackend protocol using Redis."""
-
     def __init__(self, redis):
         self._redis = redis
 
@@ -290,214 +373,51 @@ class RedisResultBackend:
     async def release_inflight(self, key: str) -> None:
         await self._redis.delete(key)
 
-backend = RedisResultBackend(redis)
-app.dependency_overrides[get_result_backend] = lambda: backend
+app.dependency_overrides[get_result_backend] = lambda: RedisResultBackend(redis)
 ```
 
-### Provider REST Endpoints
+## Internal TaskIQ Workers
 
-All under `/v1/joblib/`:
-
-#### Registration
-
-```
-PUT /v1/joblib/rooms/{room_id}/providers
-```
-
-Register or update a provider. Idempotent on `(room_id, category, name)`. Auto-creates a worker if `worker_id` is not provided.
-
-Request body:
-```json
-{
-  "category": "filesystem",
-  "name": "local",
-  "schema": { "path": {"type": "string"} }
-}
-```
-
-#### Listing
-
-```
-GET /v1/joblib/rooms/{room_id}/providers
-```
-
-Lists providers visible from a room (room-scoped + `@global`). Paginated.
-
-#### Provider Info
-
-```
-GET /v1/joblib/rooms/{room_id}/providers/{provider_name}/info
-```
-
-Returns provider details and JSON Schema. `provider_name` is the full name (e.g., `@global:filesystem:local`).
-
-#### Data Read
-
-```
-GET /v1/joblib/rooms/{room_id}/providers/{provider_name}?params
-```
-
-Query parameters are passed to the provider's `read()` method. `provider_name` is the full name.
-
-**Responses:**
-- `200 OK` — cached result available, returned immediately
-- `202 Accepted` — dispatched to provider, result pending. Includes `Location` and `Retry-After` headers.
-
-#### Result Upload
-
-```
-POST /v1/joblib/providers/{provider_id}/results
-```
-
-Provider worker posts read results back to the server. Stores in `ResultBackend`, clears inflight lock, emits `ProviderResultReady`.
-
-```json
-{"request_hash": "abc123...", "data": [...]}
-```
-
-#### Deletion
-
-```
-DELETE /v1/joblib/providers/{provider_id}
-```
-
-Unregister a provider. Must be owned by authenticated user or superuser.
-
-### Read Request Flow
-
-```
-1. Frontend: GET /rooms/room-42/providers/@global:filesystem:local?path=/data
-2. Server: check cache → HIT: return 200
-                        → MISS: acquire inflight, emit ProviderRequest → return 202
-3. Provider client: receives ProviderRequest via Socket.IO
-                    calls provider.read(handler)
-                    POST /providers/{id}/results
-4. Server: store in ResultBackend, emit ProviderResultReady
-5. Frontend: receives ProviderResultReady, re-fetches → 200
-```
-
-### Client SDK
-
-Provider methods are integrated into `JobManager`:
+For server-side jobs that should execute without an external Python client, use the `@internal` room with taskiq:
 
 ```python
-with JobManager(api, tsio=tsio) as manager:
-    # Register a provider
-    provider_id = manager.register_provider(
-        FilesystemRead,
-        name="local",
-        handler=fsspec.filesystem("file"),
-        room="@global",
-    )
+from zndraw_joblib import register_internal_jobs
 
-    # Access all handlers (used during job execution)
-    print(manager.handlers)  # {"@global:filesystem:local": <LocalFileSystem>}
-
-    # Unregister by full_name
-    manager.unregister_provider("@global:filesystem:local")
-# disconnect() cleans up both providers and jobs
+# In your FastAPI app lifespan:
+await register_internal_jobs(
+    app=app,
+    broker=redis_broker,
+    extensions=[MyServerSideJob],
+    executor=my_executor,
+    session_factory=my_session_maker,
+)
 ```
 
-## SQLModel
+This registers extensions as taskiq tasks, creates `@internal:category:name` job rows in the database, and stores the `InternalRegistry` on `app.state.internal_registry`.
+
+For external taskiq worker processes (no FastAPI app):
 
 ```python
-from enum import Enum
-from datetime import datetime, timedelta
-from typing import Optional, Any
-from uuid import uuid4
-import uuid
+from zndraw_joblib import register_internal_tasks
 
-from sqlalchemy import Column, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSON
-from sqlmodel import SQLModel, Field, Relationship
-
-
-class TaskStatus(str, Enum):
-    PENDING = "pending"
-    CLAIMED = "claimed"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class WorkerJobLink(SQLModel, table=True):
-    """Bare M:N link between Worker and Job."""
-    worker_id: str = Field(foreign_key="worker.id", primary_key=True)
-    job_id: uuid.UUID = Field(foreign_key="job.id", primary_key=True)
-
-
-class Job(SQLModel, table=True):
-    __table_args__ = (
-        UniqueConstraint("room_id", "category", "name", name="unique_job"),
-    )
-
-    id: uuid.UUID = Field(default_factory=uuid4, primary_key=True)
-    room_id: str = Field(index=True)      # "@global" or "room_123"
-    category: str = Field(index=True)     # validated against allowed list
-    name: str = Field(index=True)         # e.g., "Rotate"
-    schema: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-
-    # Relationships
-    tasks: list["Task"] = Relationship(back_populates="job")
-    workers: list["Worker"] = Relationship(back_populates="jobs", link_model=WorkerJobLink)
-
-    @property
-    def full_name(self) -> str:
-        return f"{self.room_id}:{self.category}:{self.name}"
-
-
-class Worker(SQLModel, table=True):
-    id: str = Field(primary_key=True)  # from JWT identity
-    last_heartbeat: datetime = Field(default_factory=datetime.utcnow, index=True)
-
-    # Relationships
-    jobs: list[Job] = Relationship(back_populates="workers", link_model=WorkerJobLink)
-    tasks: list["Task"] = Relationship(back_populates="worker")
-
-    def is_alive(self, threshold: timedelta) -> bool:
-        return datetime.utcnow() - self.last_heartbeat < threshold
-
-
-class Task(SQLModel, table=True):
-    id: uuid.UUID = Field(default_factory=uuid4, primary_key=True)
-
-    job_id: uuid.UUID = Field(foreign_key="job.id", index=True)
-    job: Job = Relationship(back_populates="tasks")
-
-    worker_id: Optional[str] = Field(default=None, foreign_key="worker.id")
-    worker: Optional[Worker] = Relationship(back_populates="tasks")
-
-    room_id: str = Field(index=True)  # room where task was submitted
-    created_by_id: Optional[str] = Field(default=None, index=True)
-
-    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    status: TaskStatus = Field(default=TaskStatus.PENDING, index=True)
-
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    error: Optional[str] = None
+registry = register_internal_tasks(
+    broker=redis_broker,
+    extensions=[MyServerSideJob],
+    executor=my_executor,
+)
 ```
 
-## Long-Polling
-
-`GET /v1/joblib/tasks/{task_id}` with `Prefer: wait=N`:
-- Server polls database until task reaches terminal state or timeout
-- Returns immediately on terminal state (`completed`, `failed`, `cancelled`)
-- Returns `Preference-Applied: wait` header if honored
-- Maximum wait capped by `settings.long_poll_max_wait_seconds`
+Internal tasks that exceed `internal_task_timeout_seconds` are automatically failed by the sweeper.
 
 ## Socket.IO Real-Time Events
 
 The package emits real-time events via [zndraw-socketio](https://github.com/zincware/zndraw-socketio). The host app provides its `AsyncServerWrapper` through dependency injection:
 
 ```python
-from zndraw_socketio import wrap, AsyncServerWrapper
+from zndraw_socketio import wrap
 from zndraw_joblib.dependencies import get_tsio
 
 tsio = wrap(socketio.AsyncServer(async_mode="asgi"))
-
 app.dependency_overrides[get_tsio] = lambda: tsio
 ```
 
@@ -512,19 +432,19 @@ All models are frozen Pydantic `BaseModel`s (hashable for set-based deduplicatio
 | `JobsInvalidate` | *(none)* | `room:{room_id}` | Job registered/deleted, worker connected/disconnected |
 | `TaskAvailable` | `job_name`, `room_id`, `task_id` | `jobs:{full_name}` | Task submitted (non-`@internal` only) |
 | `TaskStatusEvent` | `id`, `name`, `room_id`, `status`, timestamps, `worker_id`, `error` | `room:{room_id}` | Any task status transition |
-| `JoinJobRoom` | `job_name`, `worker_id` | *(client → server)* | Worker joins a job's notification room |
-| `LeaveJobRoom` | `job_name`, `worker_id` | *(client → server)* | Worker leaves a job's notification room |
 | `ProvidersInvalidate` | *(none)* | `room:{room_id}` | Provider registered/deleted, worker disconnected |
 | `ProviderRequest` | `request_id`, `provider_name`, `params` | `providers:{full_name}` | Server dispatches read to provider |
-| `ProviderResultReady` | `provider_name`, `request_hash` | `room:{room_id}` | Provider result cached, frontend should refetch |
-| `JoinProviderRoom` | `provider_name`, `worker_id` | *(client → server)* | Client joins provider dispatch room |
-| `LeaveProviderRoom` | `provider_name`, `worker_id` | *(client → server)* | Client leaves provider dispatch room |
+| `ProviderResultReady` | `provider_name`, `request_hash` | `room:{room_id}` | Provider result cached |
+| `JoinJobRoom` | `job_name`, `worker_id` | *(client -> server)* | Worker joins notification room |
+| `LeaveJobRoom` | `job_name`, `worker_id` | *(client -> server)* | Worker leaves notification room |
+| `JoinProviderRoom` | `provider_name`, `worker_id` | *(client -> server)* | Client joins provider dispatch room |
+| `LeaveProviderRoom` | `provider_name`, `worker_id` | *(client -> server)* | Client leaves provider dispatch room |
 
-Event names are auto-derived as snake_case by zndraw-socketio: `jobs_invalidate`, `task_available`, `task_status_event`, `providers_invalidate`, `provider_request`, etc.
+### Emission Deduplication
+
+Internally, emissions are `Emission(NamedTuple)` pairs of `(event, room)`. Functions that modify state return `set[Emission]`, and callers emit **after commit**. Frozen models ensure duplicate events are deduplicated automatically.
 
 ### Worker Notification Pattern
-
-Workers (e.g., the `ZnDraw` client class) register jobs via REST, then join the socketio room to receive task notifications:
 
 ```python
 # 1. Register job via REST
@@ -539,26 +459,9 @@ async def on_task_available(sid: str, data: TaskAvailable):
     await worker.claim_and_run(data.job_name)
 ```
 
-The host app registers the room join/leave handlers and stores the `worker_id` in the SIO session for disconnect cleanup:
-
-```python
-@tsio.on(JoinJobRoom)
-async def handle_join(sid: str, data: JoinJobRoom):
-    await tsio.enter_room(sid, f"jobs:{data.job_name}")
-    session = await tsio.get_session(sid)
-    session["worker_id"] = data.worker_id
-    await tsio.save_session(sid, session)
-
-@tsio.on(LeaveJobRoom)
-async def handle_leave(sid: str, data: LeaveJobRoom):
-    await tsio.leave_room(sid, f"jobs:{data.job_name}")
-```
-
 ### Server-Side Disconnect Cleanup
 
-When a worker's Socket.IO connection drops (crash, network loss), the host app can
-immediately clean up by calling `cleanup_worker` from its existing disconnect handler.
-The `worker_id` stored in the SIO session during `JoinJobRoom` enables the mapping:
+When a worker's Socket.IO connection drops, the host app can immediately clean up:
 
 ```python
 from zndraw_joblib import cleanup_worker, emit
@@ -566,10 +469,6 @@ from zndraw_joblib import cleanup_worker, emit
 @tsio.on("disconnect")
 async def on_disconnect(sid: str, reason: str):
     session = await tsio.get_session(sid)
-
-    # ... existing cleanup (presence, locks, etc.) ...
-
-    # Worker cleanup
     worker_id = session.get("worker_id")
     if worker_id:
         async with get_session() as db:
@@ -580,236 +479,54 @@ async def on_disconnect(sid: str, reason: str):
                 await emit(tsio, emissions)
 ```
 
-This provides immediate cleanup (fail stuck tasks, remove job links, soft-delete
-orphan jobs) without waiting for the background sweeper's heartbeat timeout.
-
 | Disconnect Scenario | Handler |
 |---------------------|---------|
 | Network drop / process kill | Server-side SIO disconnect (immediate) |
-| Graceful shutdown (`with manager:`) | Client `disconnect()` emits `LeaveJobRoom` + calls `DELETE /workers` |
+| Graceful shutdown (`with manager:`) | Client `disconnect()` emits leave events + `DELETE /workers` |
 | REST-only workers (no SIO) | Background sweeper heartbeat timeout |
-
-### Emission Deduplication
-
-Internally, emissions are `Emission(NamedTuple)` pairs of `(event, room)`. Functions that modify state return `set[Emission]`, and callers emit **after commit**. Frozen models ensure duplicate events (e.g., multiple workers disconnecting from the same job) are deduplicated automatically.
 
 ## Background Sweeper
 
 Host app starts explicitly:
 
 ```python
-from zndraw_joblib import run_sweeper, get_settings
+from zndraw_joblib import run_sweeper
 
 asyncio.create_task(
-    run_sweeper(get_session=my_session_factory, settings=get_settings(), tsio=tsio)
+    run_sweeper(get_session=my_session_factory, settings=settings, tsio=tsio)
 )
 ```
 
-The sweeper:
-1. Finds workers with stale `last_heartbeat`
+The sweeper runs periodically (`sweeper_interval_seconds`) and:
+1. Finds workers with stale `last_heartbeat` (beyond `worker_timeout_seconds`)
 2. Marks their `running`/`claimed` tasks as `FAILED`
-3. Removes orphan jobs (no workers, no pending tasks)
-4. Emits `TaskStatusEvent` and `JobsInvalidate` events after each cleanup cycle
+3. Removes orphan jobs (no workers, no pending tasks, not `@internal`)
+4. Cleans up `@internal` tasks stuck beyond `internal_task_timeout_seconds`
+5. Emits `TaskStatusEvent` and `JobsInvalidate` events after each cleanup cycle
 
 ## Error Handling (RFC 9457)
 
-```python
-class JobNotFound(ProblemType):
-    title = "Not Found"
-    status = 404
+All errors use [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) format:
 
-class SchemaConflict(ProblemType):
-    title = "Conflict"
-    status = 409
+| Exception | Status | Description |
+|-----------|--------|-------------|
+| `JobNotFound` | 404 | Job does not exist |
+| `SchemaConflict` | 409 | Job schema differs from existing registration |
+| `InvalidCategory` | 400 | Category not in allowed list |
+| `WorkerNotFound` | 404 | Worker does not exist |
+| `TaskNotFound` | 404 | Task does not exist |
+| `InvalidTaskTransition` | 409 | Invalid status transition |
+| `InvalidRoomId` | 400 | Room ID contains `@` or `:` |
+| `Forbidden` | 403 | Admin privileges required |
+| `InternalJobNotConfigured` | 503 | Internal job has no executor |
+| `ProviderNotFound` | 404 | Provider does not exist |
 
-class InvalidCategory(ProblemType):
-    title = "Bad Request"
-    status = 400
+## ORM Models
 
-class WorkerNotFound(ProblemType):
-    title = "Not Found"
-    status = 404
+Models use SQLAlchemy 2.0 ORM inheriting from `zndraw_auth.Base`:
 
-class TaskNotFound(ProblemType):
-    title = "Not Found"
-    status = 404
-
-class InvalidTaskTransition(ProblemType):
-    title = "Conflict"
-    status = 409
-
-class ProviderNotFound(ProblemType):
-    title = "Not Found"
-    status = 404
-```
-
-## Client
-
-```python
-import time
-import httpx
-from datetime import datetime
-from typing import Any, Protocol
-from pydantic import BaseModel
-
-
-class ApiManager(Protocol):
-    http: httpx.Client
-    def get_headers(self) -> dict[str, str]: ...
-    @property
-    def base_url(self) -> str: ...
-
-
-class ClaimedTask(BaseModel):
-    """Pydantic model for a claimed task."""
-    id: str
-    job_name: str  # full name: room_id:category:name
-    room_id: str
-    payload: dict[str, Any]
-    created_at: datetime
-
-
-class TaskStream:
-    """Iterator for consuming tasks."""
-    def __init__(self, api: ApiManager, worker_id: str, polling_interval: float = 2.0):
-        self.api = api
-        self.worker_id = worker_id
-        self.interval = polling_interval
-        self._stop_event = False
-
-    def __iter__(self):
-        return self
-
-    def __next__(self) -> ClaimedTask:
-        if self._stop_event:
-            raise StopIteration
-
-        while True:
-            response = self.api.http.post(
-                f"{self.api.base_url}/v1/joblib/tasks/claim",
-                headers=self.api.get_headers(),
-            )
-            data = response.json()
-            if data.get("task"):
-                return ClaimedTask.model_validate(data["task"])
-            time.sleep(self.interval)
-
-    def stop(self):
-        self._stop_event = True
-
-
-class JobManager:
-    """Main entry point. Behaves like a dictionary of registered jobs."""
-
-    def __init__(self, api: ApiManager):
-        self.api = api
-        self._registry: dict[str, type[BaseModel]] = {}
-
-    def __getitem__(self, key: str):
-        return self._registry[key]
-
-    def __len__(self):
-        return len(self._registry)
-
-    def __iter__(self):
-        return iter(self._registry)
-
-    def register(self, task_class: type[BaseModel] | None = None, *, room: str | None = None):
-        """
-        Register a job. room=None defaults to @global.
-
-        Extension classes are Pydantic BaseModels. Schema is derived via model_json_schema().
-
-        Usage:
-            @vis.jobs.register
-            class Rotate(BaseModel):
-                angle: float = 0.0
-
-            @vis.jobs.register(room="room_123")
-            class PrivateRotate(BaseModel):
-                angle: float = 0.0
-
-            vis.jobs.register(MyJob, room="room_123")
-        """
-        def decorator(cls: type[BaseModel]):
-            self._register_impl(cls, room)
-            return cls
-
-        if task_class is None:
-            return decorator
-        return decorator(task_class)
-
-    def _register_impl(self, cls: type[BaseModel], room: str | None):
-        room_id = room if room is not None else "@global"
-        category = getattr(cls, "category", "modifiers")
-        name = cls.__name__
-
-        # Schema from Pydantic model
-        schema = cls.model_json_schema()
-
-        self.api.http.put(
-            f"{self.api.base_url}/v1/joblib/rooms/{room_id}/jobs",
-            headers=self.api.get_headers(),
-            json={"category": category, "name": name, "schema": schema},
-        )
-
-        full_name = f"{room_id}:{category}:{name}"
-        self._registry[full_name] = cls
-
-    def listen(self, interval: float = 2.0) -> TaskStream:
-        """Returns an iterator to process tasks."""
-        worker_id = self._get_worker_id()
-        return TaskStream(self.api, worker_id, interval)
-
-    def _get_worker_id(self) -> str:
-        response = self.api.http.get(
-            f"{self.api.base_url}/v1/me",
-            headers=self.api.get_headers(),
-        )
-        return response.json()["id"]
-
-    def heartbeat(self):
-        """Manually send worker heartbeat. Call during long task execution."""
-        worker_id = self._get_worker_id()
-        self.api.http.patch(
-            f"{self.api.base_url}/v1/joblib/workers/{worker_id}",
-            headers=self.api.get_headers(),
-        )
-```
-
-### Usage Example
-
-```python
-from pydantic import BaseModel
-
-# Context manager for automatic cleanup on shutdown
-with JobManager(api, tsio=tsio) as manager:
-    # 1. Register jobs
-    @manager.register  # @global by default
-    class Rotate(Extension):
-        category: ClassVar[Category] = Category.MODIFIER
-        angle: float = 0.0
-
-    @manager.register(room="room_123")
-    class PrivateRotate(Extension):
-        category: ClassVar[Category] = Category.MODIFIER
-        angle: float = 0.0
-
-    print(len(manager))  # 2 Jobs Registered
-
-    # 2. Consume tasks
-    for task in manager.listen(stop_event=shutdown):
-        manager.heartbeat()  # keep alive during processing
-        task.extension.run()
-# disconnect() called automatically: LeaveJobRoom emitted, DELETE /workers called
-```
-
-### Notes
-
-- Extension classes are **Pydantic BaseModels** with a `category` ClassVar and `run()` method
-- Schema is generated via `cls.model_json_schema()`
-- Re-registering validates schema match (raises on mismatch)
-- `room=None` (default) registers to `@global`
-- Worker must call `heartbeat()` explicitly during long-running tasks
-- Use `with JobManager(...) as manager:` for automatic cleanup on shutdown
-- Or call `manager.disconnect()` explicitly for manual cleanup
+- **Job** - `(room_id, category, name)` unique, soft-deleted via `deleted` flag
+- **Worker** - Tracks `last_heartbeat`, linked to user via `user_id`
+- **Task** - Status state machine, linked to job and claiming worker
+- **WorkerJobLink** - M:N bridge between Worker and Job
+- **ProviderRecord** - `(room_id, category, name)` unique, linked to worker
