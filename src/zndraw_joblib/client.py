@@ -630,9 +630,17 @@ class JobManager:
             logger.warning("Unknown provider: %s", event.provider_name)
             return
 
-        params = json.loads(event.params)
-        instance = reg.cls(**params)
-        result = instance.read(reg.handler)
+        try:
+            params = json.loads(event.params)
+            instance = reg.cls(**params)
+            result = instance.read(reg.handler)
+        except Exception:
+            logger.exception(
+                "Provider %s read failed for request %s",
+                event.provider_name,
+                event.request_id,
+            )
+            return
 
         resp = self.api.http.post(
             f"{self.api.base_url}/v1/joblib/providers/{reg.id}/results",

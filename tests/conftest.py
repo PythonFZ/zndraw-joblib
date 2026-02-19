@@ -4,7 +4,7 @@
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, ClassVar
 from unittest.mock import MagicMock
 
 import httpx
@@ -17,6 +17,7 @@ from zndraw_auth import Base, User
 
 from zndraw_joblib.dependencies import get_result_backend
 from zndraw_joblib.exceptions import ProblemException, problem_exception_handler
+from zndraw_joblib.provider import Provider
 from zndraw_joblib.router import router
 from zndraw_joblib.settings import JobLibSettings
 
@@ -113,6 +114,56 @@ class InMemoryResultBackend:
 
     async def release_inflight(self, key: str) -> None:
         self._inflight.discard(key)
+
+
+class _MockClientApi:
+    """Adapter to make TestClient work with JobManager's ApiManager protocol."""
+
+    def __init__(self, test_client):
+        self._client = test_client
+
+    @property
+    def http(self):
+        return self._client
+
+    @property
+    def base_url(self) -> str:
+        return ""
+
+    def get_headers(self) -> dict[str, str]:
+        return {}
+
+    def raise_for_status(self, response) -> None:
+        if response.status_code >= 400:
+            response.raise_for_status()
+
+
+class _FsProvider(Provider):
+    """Test provider for filesystem reads."""
+
+    category: ClassVar[str] = "filesystem"
+    path: str = "/"
+
+    def read(self, handler):
+        return handler.list_dir(self.path)
+
+
+@pytest.fixture
+def mock_client_api():
+    """Return the MockClientApi class for wrapping TestClient as ApiManager."""
+    return _MockClientApi
+
+
+@pytest.fixture
+def api(client):
+    """MockClientApi wrapping the default test client."""
+    return _MockClientApi(client)
+
+
+@pytest.fixture
+def fs_provider():
+    """Return the FsProvider class for provider tests."""
+    return _FsProvider
 
 
 def _build_app(

@@ -12,7 +12,6 @@ from zndraw_joblib.client import (
     JobManager,
 )
 from zndraw_joblib.events import JoinJobRoom, LeaveJobRoom, ProviderRequest
-from zndraw_joblib.provider import Provider
 from zndraw_joblib.schemas import (
     JobResponse,
     JobSummary,
@@ -29,29 +28,6 @@ class ConcreteExtension(Extension):
     def run(self) -> None:
         pass
 
-
-class MockClientApi:
-    """Adapter to make TestClient work with JobManager's ApiManager protocol."""
-
-    def __init__(self, test_client, identity: str = "test_worker"):
-        self._client = test_client
-        self._identity = identity
-
-    @property
-    def http(self):
-        return self._client
-
-    @property
-    def base_url(self) -> str:
-        return ""  # TestClient doesn't need base_url
-
-    def get_headers(self) -> dict[str, str]:
-        return {}
-
-    def raise_for_status(self, response) -> None:
-        """Raise HTTPError for 4xx/5xx responses."""
-        if response.status_code >= 400:
-            response.raise_for_status()
 
 
 def test_category_enum():
@@ -79,9 +55,8 @@ def test_extension_requires_category():
         (Category.ANALYSIS, "analysis"),
     ],
 )
-def test_job_manager_register_category(client, category, expected_value):
+def test_job_manager_register_category(api, client, category, expected_value):
     """JobManager.register should create job with the given category."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     # Dynamically create a class with the given category
@@ -103,9 +78,8 @@ def test_job_manager_register_category(client, category, expected_value):
     assert full_name in job_names
 
 
-def test_job_manager_register_with_room(client):
+def test_job_manager_register_with_room(api, client):
     """JobManager.register(room=...) should create room-specific job."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register(room="my_room")
@@ -122,9 +96,8 @@ def test_job_manager_register_with_room(client):
     assert "my_room:modifiers:PrivateJob" in job_names
 
 
-def test_job_manager_getitem_returns_class(client):
+def test_job_manager_getitem_returns_class(api, client):
     """JobManager[full_name] should return the registered class."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -135,9 +108,8 @@ def test_job_manager_getitem_returns_class(client):
     assert manager["@global:modifiers:MyJob"] is MyJob
 
 
-def test_job_manager_len(client):
+def test_job_manager_len(api, client):
     """len(JobManager) should return number of registered jobs."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     assert len(manager) == 0
@@ -155,9 +127,8 @@ def test_job_manager_len(client):
     assert len(manager) == 2
 
 
-def test_job_manager_iter(client):
+def test_job_manager_iter(api, client):
     """iter(JobManager) should iterate over registered job names."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -173,9 +144,8 @@ def test_job_manager_iter(client):
     assert "@global:modifiers:JobB" in names
 
 
-def test_job_manager_schema_sent_to_server(client):
+def test_job_manager_schema_sent_to_server(api, client):
     """JobManager should send the Pydantic schema to the server."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -193,9 +163,8 @@ def test_job_manager_schema_sent_to_server(client):
     assert "axis" in job.schema_["properties"]
 
 
-def test_job_manager_listen_yields_extension_instance(client):
+def test_job_manager_listen_yields_extension_instance(api, client):
     """JobManager.listen() should yield Extension instances with payload data."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -220,9 +189,8 @@ def test_job_manager_listen_yields_extension_instance(client):
         break  # Only get one task
 
 
-def test_job_manager_listen_returns_none_when_empty(client):
+def test_job_manager_listen_returns_none_when_empty(api, client):
     """JobManager.listen() with timeout should return when no tasks available."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -234,9 +202,8 @@ def test_job_manager_listen_returns_none_when_empty(client):
     assert claimed is None
 
 
-def test_job_manager_claim_until_empty(client):
+def test_job_manager_claim_until_empty(api, client):
     """Calling claim repeatedly should return None when no more tasks."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -267,10 +234,9 @@ def test_job_manager_claim_until_empty(client):
     assert manager.claim() is None
 
 
-def test_job_manager_heartbeat(client):
+def test_job_manager_heartbeat(api, client):
     """JobManager.heartbeat() should update worker timestamp."""
 
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -288,9 +254,8 @@ def test_job_manager_heartbeat(client):
     assert response.status_code == 200
 
 
-def test_job_manager_complete_workflow(client):
+def test_job_manager_complete_workflow(api, client):
     """Test complete workflow: register, submit, claim, complete, verify empty."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -340,9 +305,8 @@ def test_job_manager_complete_workflow(client):
     assert completed.completed_at is not None
 
 
-def test_job_manager_claimed_task_has_metadata(client):
+def test_job_manager_claimed_task_has_metadata(api, client):
     """ClaimedTask should include task_id, room_id, job_name, and extension."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -364,9 +328,8 @@ def test_job_manager_claimed_task_has_metadata(client):
     assert claimed.extension.value == 99
 
 
-def test_job_manager_submit(client):
+def test_job_manager_submit(api, client):
     """JobManager.submit() should create a task via the server."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -387,27 +350,24 @@ def test_job_manager_submit(client):
     assert task.job_name == "@global:modifiers:SubmitJob"
 
 
-def test_job_manager_claim_raises_without_worker_id(client):
+def test_job_manager_claim_raises_without_worker_id(api, client):
     """claim() should raise ValueError if worker_id is not set."""
-    api = MockClientApi(client)
     manager = JobManager(api)
     # Don't register any jobs (so _worker_id stays None)
     with pytest.raises(ValueError, match="Worker ID not set"):
         manager.claim()
 
 
-def test_job_manager_heartbeat_raises_without_worker_id(client):
+def test_job_manager_heartbeat_raises_without_worker_id(api, client):
     """heartbeat() should raise ValueError if worker_id is not set."""
-    api = MockClientApi(client)
     manager = JobManager(api)
     with pytest.raises(ValueError, match="Worker ID not set"):
         manager.heartbeat()
 
 
-def test_job_manager_register_emits_join_job_room(client):
+def test_job_manager_register_emits_join_job_room(api, client):
     """register() should emit JoinJobRoom when tsio is provided."""
     mock_tsio = MagicMock()
-    api = MockClientApi(client)
     manager = JobManager(api, tsio=mock_tsio)
 
     @manager.register
@@ -422,10 +382,9 @@ def test_job_manager_register_emits_join_job_room(client):
     assert event.worker_id == str(manager.worker_id)
 
 
-def test_job_manager_register_emits_join_for_each_job(client):
+def test_job_manager_register_emits_join_for_each_job(api, client):
     """register() should emit JoinJobRoom for each registered job."""
     mock_tsio = MagicMock()
-    api = MockClientApi(client)
     manager = JobManager(api, tsio=mock_tsio)
 
     @manager.register
@@ -447,9 +406,8 @@ def test_job_manager_register_emits_join_for_each_job(client):
     )
 
 
-def test_job_manager_register_no_tsio_no_emit(client):
+def test_job_manager_register_no_tsio_no_emit(api, client):
     """register() should not break when tsio is None (default)."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -459,10 +417,9 @@ def test_job_manager_register_no_tsio_no_emit(client):
     assert "@global:modifiers:NoTsioJob" in manager
 
 
-def test_job_manager_register_room_emits_correct_job_name(client):
+def test_job_manager_register_room_emits_correct_job_name(api, client):
     """register(room=...) should emit JoinJobRoom with room-scoped job name."""
     mock_tsio = MagicMock()
-    api = MockClientApi(client)
     manager = JobManager(api, tsio=mock_tsio)
 
     @manager.register(room="my_room")
@@ -481,10 +438,9 @@ def test_extension_cannot_be_instantiated_directly():
         Extension()
 
 
-def test_job_manager_disconnect_emits_leave_and_deletes_worker(client):
+def test_job_manager_disconnect_emits_leave_and_deletes_worker(api, client):
     """disconnect() should emit LeaveJobRoom for each job and DELETE the worker."""
     mock_tsio = MagicMock()
-    api = MockClientApi(client)
     manager = JobManager(api, tsio=mock_tsio)
 
     @manager.register
@@ -517,9 +473,8 @@ def test_job_manager_disconnect_emits_leave_and_deletes_worker(client):
     assert resp.status_code == 404
 
 
-def test_job_manager_disconnect_no_tsio(client):
+def test_job_manager_disconnect_no_tsio(api, client):
     """disconnect() should work without tsio (REST-only cleanup)."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -547,9 +502,8 @@ def test_job_manager_disconnect_no_worker_id():
     assert manager.worker_id is None
 
 
-def _register_claim(client):
+def _register_claim(api, client):
     """Helper: register a job, submit a task, claim it. Returns (manager, claimed)."""
-    api = MockClientApi(client)
     manager = JobManager(api)
 
     @manager.register
@@ -566,9 +520,9 @@ def _register_claim(client):
     return manager, claimed
 
 
-def test_job_manager_start_transitions_to_running(client):
+def test_job_manager_start_transitions_to_running(api, client):
     """manager.start(task) should transition task from CLAIMED to RUNNING."""
-    manager, claimed = _register_claim(client)
+    manager, claimed = _register_claim(api, client)
 
     manager.start(claimed)
 
@@ -578,9 +532,9 @@ def test_job_manager_start_transitions_to_running(client):
     assert task.started_at is not None
 
 
-def test_job_manager_complete_transitions_to_completed(client):
+def test_job_manager_complete_transitions_to_completed(api, client):
     """manager.complete(task) should transition task from RUNNING to COMPLETED."""
-    manager, claimed = _register_claim(client)
+    manager, claimed = _register_claim(api, client)
 
     manager.start(claimed)
     manager.complete(claimed)
@@ -591,9 +545,9 @@ def test_job_manager_complete_transitions_to_completed(client):
     assert task.completed_at is not None
 
 
-def test_job_manager_fail_transitions_to_failed_with_error(client):
+def test_job_manager_fail_transitions_to_failed_with_error(api, client):
     """manager.fail(task, error) should transition to FAILED and store error."""
-    manager, claimed = _register_claim(client)
+    manager, claimed = _register_claim(api, client)
 
     manager.start(claimed)
     manager.fail(claimed, "something broke")
@@ -605,9 +559,9 @@ def test_job_manager_fail_transitions_to_failed_with_error(client):
     assert task.completed_at is not None
 
 
-def test_job_manager_cancel_from_claimed(client):
+def test_job_manager_cancel_from_claimed(api, client):
     """manager.cancel(task) should transition from CLAIMED to CANCELLED."""
-    manager, claimed = _register_claim(client)
+    manager, claimed = _register_claim(api, client)
 
     manager.cancel(claimed)
 
@@ -616,9 +570,9 @@ def test_job_manager_cancel_from_claimed(client):
     assert task.status.value == "cancelled"
 
 
-def test_job_manager_cancel_from_running(client):
+def test_job_manager_cancel_from_running(api, client):
     """manager.cancel(task) should transition from RUNNING to CANCELLED."""
-    manager, claimed = _register_claim(client)
+    manager, claimed = _register_claim(api, client)
 
     manager.start(claimed)
     manager.cancel(claimed)
@@ -628,10 +582,9 @@ def test_job_manager_cancel_from_running(client):
     assert task.status.value == "cancelled"
 
 
-def test_job_manager_context_manager(client):
+def test_job_manager_context_manager(api, client):
     """JobManager should support with-statement for automatic disconnect."""
     mock_tsio = MagicMock()
-    api = MockClientApi(client)
 
     with JobManager(api, tsio=mock_tsio) as manager:
 
@@ -654,20 +607,9 @@ def test_job_manager_context_manager(client):
 # --- Provider request handler (ProviderRequest SIO dispatch) ---
 
 
-class FsProvider(Provider):
-    """Test provider for filesystem reads."""
-
-    category: ClassVar[str] = "filesystem"
-    path: str = "/"
-
-    def read(self, handler):
-        return handler.list_dir(self.path)
-
-
-def test_sio_handlers_registered_in_init(client):
+def test_sio_handlers_registered_in_init(api, client):
     """SIO handlers (ProviderRequest, TaskAvailable) registered in __init__."""
     mock_tsio = MagicMock()
-    api = MockClientApi(client)
     JobManager(api, tsio=mock_tsio)
 
     # tsio.on should have been called for ProviderRequest (and TaskAvailable)
@@ -675,23 +617,21 @@ def test_sio_handlers_registered_in_init(client):
     assert ProviderRequest in on_calls
 
 
-def test_sio_handlers_not_registered_without_tsio(client):
+def test_sio_handlers_not_registered_without_tsio(api, client):
     """No error when tsio is None (no SIO handlers)."""
-    api = MockClientApi(client)
     manager = JobManager(api)
     assert manager.tsio is None  # Just works, no error
 
 
-def test_provider_request_handler_dispatches_read(client):
+def test_provider_request_handler_dispatches_read(api, client, fs_provider):
     """ProviderRequest handler should call read() and POST result back."""
     mock_tsio = MagicMock()
-    api = MockClientApi(client)
     manager = JobManager(api, tsio=mock_tsio)
 
     mock_handler = MagicMock()
     mock_handler.list_dir.return_value = [{"name": "file.xyz", "size": 42}]
 
-    manager.register_provider(FsProvider, name="local", handler=mock_handler)
+    manager.register_provider(fs_provider, name="local", handler=mock_handler)
 
     # Trigger a read via the REST endpoint to get request_hash and inflight
     read_resp = client.get(
@@ -725,13 +665,12 @@ def test_provider_request_handler_dispatches_read(client):
     assert cached_resp.json() == [{"name": "file.xyz", "size": 42}]
 
 
-def test_provider_request_handler_ignores_unknown_provider(client):
+def test_provider_request_handler_ignores_unknown_provider(api, client, fs_provider):
     """Handler should silently ignore ProviderRequest for unknown providers."""
     mock_tsio = MagicMock()
-    api = MockClientApi(client)
     manager = JobManager(api, tsio=mock_tsio)
 
-    manager.register_provider(FsProvider, name="local", handler=object())
+    manager.register_provider(fs_provider, name="local", handler=object())
 
     # Capture callback (registered in __init__)
     pr_calls = [c for c in mock_tsio.on.call_args_list if c[0][0] is ProviderRequest]

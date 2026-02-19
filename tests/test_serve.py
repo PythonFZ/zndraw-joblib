@@ -2,7 +2,6 @@
 """Tests for JobManager auto-serve: background claim loop, lifecycle wrapping, wait()."""
 
 import threading
-import time
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
@@ -13,7 +12,6 @@ from zndraw_joblib.client import (
     JobManager,
 )
 from zndraw_joblib.events import ProviderRequest, TaskAvailable
-from zndraw_joblib.provider import Provider
 from zndraw_joblib.schemas import TaskResponse
 
 
@@ -26,56 +24,24 @@ class _Ext(Extension):
         pass
 
 
-class _FsProvider(Provider):
-    """Test provider for serve tests."""
-
-    category: ClassVar[str] = "filesystem"
-    path: str = "/"
-
-    def read(self, handler: Any) -> Any:
-        return handler.list_dir(self.path)
-
-
-class _MockApi:
-    """Adapter making TestClient conform to ApiManager protocol."""
-
-    def __init__(self, test_client):
-        self._client = test_client
-
-    @property
-    def http(self):
-        return self._client
-
-    @property
-    def base_url(self) -> str:
-        return ""
-
-    def get_headers(self) -> dict[str, str]:
-        return {}
-
-    def raise_for_status(self, response) -> None:
-        if response.status_code >= 400:
-            response.raise_for_status()
-
-
 # ---------------------------------------------------------------------------
 # SIO handler registration
 # ---------------------------------------------------------------------------
 
 
-def test_task_available_handler_registered_in_init(client):
+def test_task_available_handler_registered_in_init(mock_client_api, client):
     """TaskAvailable SIO handler is registered in __init__."""
     mock_tsio = MagicMock()
-    JobManager(_MockApi(client), tsio=mock_tsio)
+    JobManager(mock_client_api(client), tsio=mock_tsio)
 
     on_events = [c[0][0] for c in mock_tsio.on.call_args_list]
     assert TaskAvailable in on_events
 
 
-def test_provider_request_handler_registered_in_init(client):
+def test_provider_request_handler_registered_in_init(mock_client_api, client):
     """ProviderRequest SIO handler is registered in __init__."""
     mock_tsio = MagicMock()
-    JobManager(_MockApi(client), tsio=mock_tsio)
+    JobManager(mock_client_api(client), tsio=mock_tsio)
 
     on_events = [c[0][0] for c in mock_tsio.on.call_args_list]
     assert ProviderRequest in on_events
@@ -86,16 +52,16 @@ def test_provider_request_handler_registered_in_init(client):
 # ---------------------------------------------------------------------------
 
 
-def test_no_threads_before_registration(client):
+def test_no_threads_before_registration(mock_client_api, client):
     """No background threads start before first register() call."""
-    manager = JobManager(_MockApi(client), execute=lambda t: None)
+    manager = JobManager(mock_client_api(client), execute=lambda t: None)
     assert not manager._threads_started
     manager.disconnect()
 
 
-def test_threads_start_on_first_register(client):
+def test_threads_start_on_first_register(mock_client_api, client):
     """Background threads start after first register()."""
-    manager = JobManager(_MockApi(client), execute=lambda t: None)
+    manager = JobManager(mock_client_api(client), execute=lambda t: None)
 
     @manager.register
     class Job(_Ext):
@@ -105,21 +71,24 @@ def test_threads_start_on_first_register(client):
     manager.disconnect()
 
 
-def test_threads_start_on_register_provider(client):
+def test_threads_start_on_register_provider(mock_client_api, fs_provider, client):
     """Background threads start after register_provider()."""
-    manager = JobManager(_MockApi(client))
-    manager.register_provider(_FsProvider, name="local", handler=object())
+    manager = JobManager(mock_client_api(client))
+    manager.register_provider(fs_provider, name="local", handler=object())
     assert manager._threads_started
     manager.disconnect()
 
 
-def test_no_claim_loop_without_execute(client):
+def test_no_claim_loop_without_execute(mock_client_api, client):
     """Without execute callback, no claim loop runs (manual mode)."""
-    manager = JobManager(_MockApi(client))
+    manager = JobManager(mock_client_api(client))
 
     @manager.register
     class Job(_Ext):
         category: ClassVar[Category] = Category.MODIFIER
+
+    # Only heartbeat thread should exist — no claim loop
+    assert len(manager._threads) == 1
 
     # Submit a task
     client.post(
@@ -127,14 +96,15 @@ def test_no_claim_loop_without_execute(client):
         json={"payload": {}},
     )
 
-    # Give background thread time to claim (if it were running)
-    time.sleep(0.1)
-
-    # Task should still be pending — no auto-claim happened
+    # Long-poll for 1s — if a claim loop existed, it would have claimed by now
     resp = client.get("/v1/joblib/rooms/room_1/tasks")
-    tasks = resp.json()["items"]
-    assert len(tasks) == 1
-    assert tasks[0]["status"] == "pending"
+    task_id = resp.json()["items"][0]["id"]
+    resp = client.get(
+        f"/v1/joblib/tasks/{task_id}",
+        headers={"Prefer": "wait=1"},
+    )
+    task = TaskResponse.model_validate(resp.json())
+    assert task.status.value == "pending"
 
     # Manual claim still works
     claimed = manager.claim()
@@ -147,7 +117,7 @@ def test_no_claim_loop_without_execute(client):
 # ---------------------------------------------------------------------------
 
 
-def test_auto_claim_executes_task(threadsafe_client):
+def test_auto_claim_executes_task(mock_client_api, threadsafe_client):
     """Background loop claims task and calls execute callback."""
     executed = threading.Event()
     received: list[ClaimedTask] = []
@@ -157,7 +127,7 @@ def test_auto_claim_executes_task(threadsafe_client):
         executed.set()
 
     manager = JobManager(
-        _MockApi(threadsafe_client), execute=execute, polling_interval=0.01
+        mock_client_api(threadsafe_client), execute=execute, polling_interval=0.01
     )
 
     @manager.register
@@ -189,7 +159,7 @@ def test_auto_claim_executes_task(threadsafe_client):
     assert task.status.value == "completed"
 
 
-def test_auto_execute_failure_marks_task_failed(threadsafe_client):
+def test_auto_execute_failure_marks_task_failed(mock_client_api, threadsafe_client):
     """If execute callback raises, task is marked FAILED with error."""
     executed = threading.Event()
     received: list[ClaimedTask] = []
@@ -200,7 +170,7 @@ def test_auto_execute_failure_marks_task_failed(threadsafe_client):
         raise RuntimeError("boom")
 
     manager = JobManager(
-        _MockApi(threadsafe_client), execute=execute, polling_interval=0.01
+        mock_client_api(threadsafe_client), execute=execute, polling_interval=0.01
     )
 
     @manager.register
@@ -229,10 +199,10 @@ def test_auto_execute_failure_marks_task_failed(threadsafe_client):
 # ---------------------------------------------------------------------------
 
 
-def test_disconnect_stops_background_threads(client):
+def test_disconnect_stops_background_threads(mock_client_api, client):
     """disconnect() signals background threads to stop."""
     manager = JobManager(
-        _MockApi(client), execute=lambda t: None, polling_interval=0.01
+        mock_client_api(client), execute=lambda t: None, polling_interval=0.01
     )
 
     @manager.register
@@ -244,9 +214,9 @@ def test_disconnect_stops_background_threads(client):
     assert manager._stop.is_set()
 
 
-def test_wait_blocks_until_disconnect(client):
+def test_wait_blocks_until_disconnect(mock_client_api, client):
     """wait() blocks until disconnect() is called from another thread."""
-    manager = JobManager(_MockApi(client))
+    manager = JobManager(mock_client_api(client))
 
     @manager.register
     class WaitJob(_Ext):
@@ -269,10 +239,10 @@ def test_wait_blocks_until_disconnect(client):
     assert unblocked.wait(timeout=2.0), "wait() did not unblock after disconnect()"
 
 
-def test_context_manager_stops_threads(client):
+def test_context_manager_stops_threads(mock_client_api, client):
     """Exiting context manager stops background threads."""
     with JobManager(
-        _MockApi(client), execute=lambda t: None, polling_interval=0.01
+        mock_client_api(client), execute=lambda t: None, polling_interval=0.01
     ) as manager:
 
         @manager.register
@@ -290,7 +260,7 @@ def test_context_manager_stops_threads(client):
 # ---------------------------------------------------------------------------
 
 
-def test_e2e_job_and_provider_lifecycle(threadsafe_client):
+def test_e2e_job_and_provider_lifecycle(mock_client_api, fs_provider, threadsafe_client):
     """Full e2e: register job + provider, submit task → auto-executed,
     read provider → dispatched and cached."""
     executed = threading.Event()
@@ -305,7 +275,7 @@ def test_e2e_job_and_provider_lifecycle(threadsafe_client):
     mock_handler.list_dir.return_value = [{"name": "a.xyz"}]
 
     manager = JobManager(
-        _MockApi(threadsafe_client),
+        mock_client_api(threadsafe_client),
         tsio=mock_tsio,
         execute=execute,
         polling_interval=0.01,
@@ -318,7 +288,7 @@ def test_e2e_job_and_provider_lifecycle(threadsafe_client):
         angle: float = 0.0
 
     # 2. Register a provider
-    manager.register_provider(_FsProvider, name="local", handler=mock_handler)
+    manager.register_provider(fs_provider, name="local", handler=mock_handler)
 
     # 3. Submit a task — auto-claimed and executed by background thread
     threadsafe_client.post(
