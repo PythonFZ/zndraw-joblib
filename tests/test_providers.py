@@ -177,42 +177,38 @@ def test_get_provider_info_room_visibility(client):
     assert resp.status_code == 404
 
 
-# --- Data Read (202 / 200) ---
+# --- Data Read (long-poll / 200 / 404) ---
+
+IMMEDIATE = {"Prefer": "wait=0"}
 
 
-def test_read_provider_dispatches_202(client):
+def test_read_provider_timeout(client):
+    """No cached result + immediate timeout → 404 with Retry-After."""
     _register_provider(client)
     resp = client.get(
-        "/v1/joblib/rooms/@global/providers/@global:filesystem:local?path=/data"
+        "/v1/joblib/rooms/@global/providers/@global:filesystem:local?path=/data",
+        headers=IMMEDIATE,
     )
-    assert resp.status_code == 202
-    data = resp.json()
-    assert data["status"] == "pending"
-    assert "request_hash" in data
-    assert "Location" in resp.headers
+    assert resp.status_code == 404
+    assert resp.headers["content-type"] == "application/problem+json"
     assert "Retry-After" in resp.headers
 
 
 def test_read_provider_not_found(client):
     resp = client.get(
-        "/v1/joblib/rooms/@global/providers/@global:filesystem:nonexistent?path=/data"
+        "/v1/joblib/rooms/@global/providers/@global:filesystem:nonexistent?path=/data",
+        headers=IMMEDIATE,
     )
     assert resp.status_code == 404
 
 
 def test_read_provider_cached_200(client):
-    """Simulate the full read flow: 202 -> upload result -> 200 cache hit."""
-    # Register provider
+    """Upload result first, then read returns 200 immediately."""
     reg_resp = _register_provider(client)
     provider_id = reg_resp.json()["id"]
 
-    # First read -> 202
     params = {"path": "/data"}
-    resp1 = client.get(
-        "/v1/joblib/rooms/@global/providers/@global:filesystem:local", params=params
-    )
-    assert resp1.status_code == 202
-    rhash = resp1.json()["request_hash"]
+    rhash = request_hash(params)
 
     # Upload result
     upload_resp = client.post(
@@ -222,13 +218,12 @@ def test_read_provider_cached_200(client):
     )
     assert upload_resp.status_code == 204
 
-    # Second read -> 200 with cached data
-    resp2 = client.get(
+    # Read → 200 with cached data
+    resp = client.get(
         "/v1/joblib/rooms/@global/providers/@global:filesystem:local", params=params
     )
-    assert resp2.status_code == 200
-    data = resp2.json()
-    assert data == [{"name": "file.xyz", "size": 42}]
+    assert resp.status_code == 200
+    assert resp.json() == [{"name": "file.xyz", "size": 42}]
 
 
 def test_read_provider_inflight_coalescing(client):
@@ -236,17 +231,46 @@ def test_read_provider_inflight_coalescing(client):
     _register_provider(client)
     params = {"path": "/data"}
 
-    # First read acquires inflight
+    # First read acquires inflight, times out
     resp1 = client.get(
-        "/v1/joblib/rooms/@global/providers/@global:filesystem:local", params=params
+        "/v1/joblib/rooms/@global/providers/@global:filesystem:local",
+        params=params,
+        headers=IMMEDIATE,
     )
-    assert resp1.status_code == 202
+    assert resp1.status_code == 404
 
-    # Second read should also return 202 (inflight already acquired, no re-dispatch)
+    # Second read also times out (inflight already acquired, no re-dispatch)
     resp2 = client.get(
-        "/v1/joblib/rooms/@global/providers/@global:filesystem:local", params=params
+        "/v1/joblib/rooms/@global/providers/@global:filesystem:local",
+        params=params,
+        headers=IMMEDIATE,
     )
-    assert resp2.status_code == 202
+    assert resp2.status_code == 404
+
+
+def test_read_provider_cache_hit_skips_long_poll(client):
+    """Cache hit returns immediately without Preference-Applied header."""
+    reg_resp = _register_provider(client)
+    provider_id = reg_resp.json()["id"]
+
+    params = {"path": "/data"}
+    rhash = request_hash(params)
+
+    # Upload result first
+    client.post(
+        f"/v1/joblib/providers/{provider_id}/results",
+        content=b'"ok"',
+        headers={"X-Request-Hash": rhash},
+    )
+
+    # Cache hit returns 200 without Preference-Applied (no wait happened)
+    resp = client.get(
+        "/v1/joblib/rooms/@global/providers/@global:filesystem:local",
+        params=params,
+        headers={"Prefer": "wait=5"},
+    )
+    assert resp.status_code == 200
+    assert "Preference-Applied" not in resp.headers
 
 
 # --- Delete ---

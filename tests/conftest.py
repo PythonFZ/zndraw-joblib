@@ -96,6 +96,7 @@ class InMemoryResultBackend:
     def __init__(self):
         self._store: dict[str, bytes] = {}
         self._inflight: set[str] = set()
+        self._waiters: dict[str, list[asyncio.Event]] = {}
 
     async def store(self, key: str, data: bytes, ttl: int) -> None:
         self._store[key] = data
@@ -114,6 +115,26 @@ class InMemoryResultBackend:
 
     async def release_inflight(self, key: str) -> None:
         self._inflight.discard(key)
+
+    async def wait_for_key(self, key: str, timeout: float) -> bytes | None:
+        cached = self._store.get(key)
+        if cached is not None:
+            return cached
+        event = asyncio.Event()
+        self._waiters.setdefault(key, []).append(event)
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+            return self._store.get(key)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            waiters = self._waiters.get(key, [])
+            if event in waiters:
+                waiters.remove(event)
+
+    async def notify_key(self, key: str) -> None:
+        for event in self._waiters.pop(key, []):
+            event.set()
 
 
 class _MockClientApi:

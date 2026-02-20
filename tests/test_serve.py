@@ -298,13 +298,18 @@ def test_e2e_job_and_provider_lifecycle(mock_client_api, fs_provider, threadsafe
     assert executed.wait(timeout=5.0), "Task not auto-executed"
     assert received[0].extension.angle == 90.0
 
-    # 4. Read provider — triggers 202, then simulate SIO dispatch
+    # 4. Read provider — dispatch (immediate timeout), then simulate SIO
+    from zndraw_joblib.dependencies import request_hash as compute_hash
+
+    params = {"path": "/data"}
+    rhash = compute_hash(params)
+
     read_resp = threadsafe_client.get(
         "/v1/joblib/rooms/@global/providers/@global:filesystem:local",
-        params={"path": "/data"},
+        params=params,
+        headers={"Prefer": "wait=0"},
     )
-    assert read_resp.status_code == 202
-    request_hash = read_resp.json()["request_hash"]
+    assert read_resp.status_code == 404
 
     # Get the ProviderRequest handler from __init__
     pr_calls = [
@@ -314,16 +319,16 @@ def test_e2e_job_and_provider_lifecycle(mock_client_api, fs_provider, threadsafe
 
     # Simulate server dispatching the event
     event = ProviderRequest.from_dict_params(
-        request_id=request_hash,
+        request_id=rhash,
         provider_name="@global:filesystem:local",
-        params={"path": "/data"},
+        params=params,
     )
     pr_callback(event)
 
     # 5. Verify cached result
     cached_resp = threadsafe_client.get(
         "/v1/joblib/rooms/@global/providers/@global:filesystem:local",
-        params={"path": "/data"},
+        params=params,
     )
     assert cached_resp.status_code == 200
     assert cached_resp.json() == [{"name": "a.xyz"}]

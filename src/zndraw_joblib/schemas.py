@@ -132,6 +132,3 @@ class ProviderResponse(BaseModel):
         )
 
 
-class ProviderReadPendingResponse(BaseModel):
-    status: str
-    request_hash: str

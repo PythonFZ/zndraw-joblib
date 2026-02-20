@@ -12,7 +12,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
-from zndraw_auth import User, current_active_user, current_superuser
+from zndraw_auth import User, current_active_user, current_superuser, current_user_scoped_session
 from zndraw_auth.db import SessionDep, get_session_maker
 from zndraw_socketio import AsyncServerWrapper
 
@@ -42,6 +42,7 @@ from zndraw_joblib.exceptions import (
     InvalidTaskTransition,
     JobNotFound,
     ProviderNotFound,
+    ProviderTimeout,
     SchemaConflict,
     TaskNotFound,
     WorkerNotFound,
@@ -61,7 +62,6 @@ from zndraw_joblib.schemas import (
     JobResponse,
     JobSummary,
     PaginatedResponse,
-    ProviderReadPendingResponse,
     ProviderRegisterRequest,
     ProviderResponse,
     TaskClaimRequest,
@@ -78,6 +78,7 @@ logger = logging.getLogger(__name__)
 
 # Type aliases for dependency injection
 CurrentUserDep = Annotated[User, Depends(current_active_user)]
+CurrentUserFactoryDep = Annotated[User, Depends(current_user_scoped_session)]
 SuperUserDep = Annotated[User, Depends(current_superuser)]
 SettingsDep = JobLibSettingsDep
 SessionMakerDep = Annotated[
@@ -118,21 +119,12 @@ async def _queue_position(session: AsyncSession, task: Task) -> int | None:
     return positions.get(task.id)
 
 
-async def _resolve_job(session: AsyncSession, job_name: str, room_id: str) -> Job:
+async def _resolve_job(session: AsyncSession, job_name: str) -> Job:
     parts = job_name.split(":", 2)
     if len(parts) != 3:
         raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
     job_room_id, category, name = parts
 
-    # For non-special rooms, the job must be in the room, @global, or @internal
-    if room_id not in ("@global", "@internal") and job_room_id not in (
-        "@global",
-        "@internal",
-        room_id,
-    ):
-        raise JobNotFound.exception(
-            detail=f"Job '{job_name}' not accessible from room '{room_id}'"
-        )
     result = await session.execute(
         select(Job).where(
             Job.room_id == job_room_id,
@@ -511,7 +503,7 @@ async def list_tasks_for_job(
     """List tasks for a specific job. Includes queue position for pending tasks."""
     validate_room_id(room_id)
 
-    job = await _resolve_job(session, job_name, room_id)
+    job = await _resolve_job(session, job_name)
 
     base_query = select(Task).where(Task.job_id == job.id, Task.room_id == room_id)
     if task_status:
@@ -545,7 +537,7 @@ async def get_job(
     """Get job details by full name."""
     validate_room_id(room_id)
 
-    job = await _resolve_job(session, job_name, room_id)
+    job = await _resolve_job(session, job_name)
 
     result = await session.execute(
         select(WorkerJobLink).where(WorkerJobLink.job_id == job.id)
@@ -580,7 +572,7 @@ async def submit_task(
     tsio: TsioDep,
 ):
     """Submit a task for processing."""
-    job = await _resolve_job(session, job_name, room_id)
+    job = await _resolve_job(session, job_name)
 
     # Validate internal registry BEFORE creating the task to avoid orphans
     if job.room_id == "@internal":
@@ -1103,49 +1095,41 @@ async def get_provider_info(
     return ProviderResponse.from_record(provider)
 
 
-@router.get(
-    "/rooms/{room_id}/providers/{provider_name:path}",
-    response_model=ProviderReadPendingResponse,
-    responses={200: {"description": "Cached result", "content": {"application/json": {}}}},
-)
+@router.get("/rooms/{room_id}/providers/{provider_name:path}")
 async def read_provider(
     room_id: str,
     provider_name: str,
     request: Request,
     response: Response,
-    session: SessionDep,
+    session_maker: SessionMakerDep,
+    current_user: CurrentUserFactoryDep,
     result_backend: ResultBackendDep,
     settings: SettingsDep,
     tsio: TsioDep,
+    prefer: str | None = Header(None),
 ):
-    """Read data from a provider. Returns 200 if cached, 202 if dispatched."""
+    """Read data from a provider. Long-polls until result is available."""
     validate_room_id(room_id)
-    provider = await _resolve_provider(session, provider_name, room_id)
 
-    # Extract query params (exclude path params)
+    # Short-lived session — closed before long-poll
+    async with session_maker() as session:
+        provider = await _resolve_provider(session, provider_name, room_id)
+
     params = dict(request.query_params)
     rhash = request_hash(params)
-
-    # Build cache key using full_name
     cache_key = f"provider-result:{provider.full_name}:{rhash}"
     inflight_key = f"provider-inflight:{provider.full_name}:{rhash}"
 
-    # Check cache
+    # Fast path: cache hit
     cached = await result_backend.get(cache_key)
     if cached is not None:
-        return Response(
-            content=cached,
-            media_type=provider.content_type,
-            status_code=200,
-        )
+        return Response(content=cached, media_type=provider.content_type)
 
-    # Check / acquire inflight lock
+    # Dispatch if not already inflight
     acquired = await result_backend.acquire_inflight(
         inflight_key, settings.provider_inflight_ttl_seconds
     )
-
     if acquired:
-        # Dispatch to provider via Socket.IO
         provider_room = f"providers:{provider.full_name}"
         await emit(
             tsio,
@@ -1161,11 +1145,24 @@ async def read_provider(
             },
         )
 
-    # Return 202 regardless of whether we dispatched or someone else did
-    response.status_code = status.HTTP_202_ACCEPTED
-    response.headers["Location"] = str(request.url)
-    response.headers["Retry-After"] = "2"
-    return {"status": "pending", "request_hash": rhash}
+    # Long-poll: wait for result via pub/sub
+    requested_wait = parse_prefer_wait(prefer)
+    if requested_wait is not None:
+        timeout = min(requested_wait, settings.provider_long_poll_max_seconds)
+    else:
+        timeout = settings.provider_long_poll_default_seconds
+
+    result = await result_backend.wait_for_key(cache_key, timeout)
+    if result is not None:
+        if requested_wait is not None:
+            response.headers["Preference-Applied"] = f"wait={int(timeout)}"
+        return Response(content=result, media_type=provider.content_type)
+
+    # Timeout — RFC 9457 error with retry guidance
+    raise ProviderTimeout.exception(
+        detail=f"Provider '{provider_name}' did not respond within {timeout}s",
+        headers={"Retry-After": "2"},
+    )
 
 
 @router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1199,25 +1196,28 @@ async def delete_provider(
 async def upload_provider_result(
     provider_id: UUID,
     request: Request,
-    session: SessionDep,
-    user: CurrentUserDep,
+    session_maker: SessionMakerDep,
+    user: CurrentUserFactoryDep,
     result_backend: ResultBackendDep,
     settings: SettingsDep,
     tsio: TsioDep,
     x_request_hash: Annotated[str, Header()],
 ):
     """Provider worker uploads a read result."""
-    result = await session.execute(
-        select(ProviderRecord).where(ProviderRecord.id == provider_id)
-    )
-    provider = result.scalar_one_or_none()
-    if not provider:
-        raise ProviderNotFound.exception(detail=f"Provider '{provider_id}' not found")
-
-    if provider.user_id != user.id and not user.is_superuser:
-        raise Forbidden.exception(
-            detail="Not authorized to upload results for this provider"
+    async with session_maker() as session:
+        result = await session.execute(
+            select(ProviderRecord).where(ProviderRecord.id == provider_id)
         )
+        provider = result.scalar_one_or_none()
+        if not provider:
+            raise ProviderNotFound.exception(
+                detail=f"Provider '{provider_id}' not found"
+            )
+
+        if provider.user_id != user.id and not user.is_superuser:
+            raise Forbidden.exception(
+                detail="Not authorized to upload results for this provider"
+            )
 
     cache_key = f"provider-result:{provider.full_name}:{x_request_hash}"
     inflight_key = f"provider-inflight:{provider.full_name}:{x_request_hash}"
@@ -1233,7 +1233,10 @@ async def upload_provider_result(
     # Release inflight lock
     await result_backend.release_inflight(inflight_key)
 
-    # Notify frontend
+    # Wake long-polling waiters (Redis pub/sub)
+    await result_backend.notify_key(cache_key)
+
+    # Notify frontend (Socket.IO — UI refresh)
     await emit(
         tsio,
         {

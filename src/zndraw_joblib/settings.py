@@ -21,3 +21,5 @@ class JobLibSettings(BaseSettings):
     allowed_provider_categories: list[str] | None = None  # None = unrestricted
     provider_result_ttl_seconds: int = 300
     provider_inflight_ttl_seconds: int = 30
+    provider_long_poll_default_seconds: int = 5
+    provider_long_poll_max_seconds: int = 30

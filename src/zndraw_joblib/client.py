@@ -6,6 +6,7 @@ import logging
 import signal
 import threading
 import time
+import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -618,6 +619,19 @@ class JobManager:
             else:
                 self._task_ready.wait(timeout=self._polling_interval)
 
+    # -- Logging helpers -------------------------------------------------------
+
+    def _log_to_room(self, room_id: str, message: str) -> None:
+        """Send a chat message to a room (best-effort, never raises)."""
+        try:
+            self.api.http.post(
+                f"{self.api.base_url}/v1/rooms/{room_id}/chat/messages",
+                json={"content": message},
+                headers=self.api.get_headers(),
+            )
+        except Exception:
+            logger.debug("Failed to log message to room %s", room_id, exc_info=True)
+
     # -- SIO event handlers ---------------------------------------------------
 
     def _on_task_available(self, _event: TaskAvailable) -> None:
@@ -640,6 +654,12 @@ class JobManager:
                 "Provider %s read failed for request %s",
                 event.provider_name,
                 event.request_id,
+            )
+            traceback.print_exc()
+            self._log_to_room(
+                reg.room_id,
+                f"Provider `{event.provider_name}` read failed for "
+                f"request `{event.request_id}`:\n```\n{traceback.format_exc()}```",
             )
             return
 

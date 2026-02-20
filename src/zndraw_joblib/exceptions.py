@@ -160,3 +160,10 @@ class ProviderNotFound(ProblemType):
 
     title: ClassVar[str] = "Not Found"
     status: ClassVar[int] = 404
+
+
+class ProviderTimeout(ProblemType):
+    """The provider did not respond within the requested wait time."""
+
+    title: ClassVar[str] = "Not Found"
+    status: ClassVar[int] = 404

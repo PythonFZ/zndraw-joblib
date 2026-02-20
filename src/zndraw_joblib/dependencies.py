@@ -73,6 +73,23 @@ class ResultBackend(Protocol):
 
     async def release_inflight(self, key: str) -> None: ...
 
+    async def wait_for_key(self, key: str, timeout: float) -> bytes | None:
+        """Wait for a cache key to be populated.
+
+        Subscribes to a notification channel, checks cache (race-safe),
+        then awaits notification or timeout.
+
+        Returns
+        -------
+        bytes | None
+            Cached data if it arrives within timeout, None otherwise.
+        """
+        ...
+
+    async def notify_key(self, key: str) -> None:
+        """Notify waiters that a cache key has been populated."""
+        ...
+
 
 async def get_result_backend() -> ResultBackend:
     """Return the configured ResultBackend.

@@ -115,22 +115,22 @@ def test_submit_task_malformed_job_name_one_colon(seeded_client):
     assert "Invalid job name format" in error.detail
 
 
-def test_submit_task_cross_room_access_rejected(client):
-    """Job registered in room_A cannot be submitted to from room_B."""
+def test_submit_task_cross_room_allowed(client):
+    """Job registered in room_A can be submitted to target room_B."""
     # Register a room-scoped job in room_A
     client.put(
         "/v1/joblib/rooms/room_A/jobs",
         json={"category": "modifiers", "name": "Private", "schema": {}},
     )
 
-    # Try to submit a task from room_B to room_A's job
+    # Submit a task targeting room_B using room_A's job
     response = client.post(
         "/v1/joblib/rooms/room_B/tasks/room_A:modifiers:Private",
         json={"payload": {}},
     )
-    assert response.status_code == 404
-    error = ProblemDetail.model_validate(response.json())
-    assert "not accessible" in error.detail
+    assert response.status_code == 202
+    data = TaskResponse.model_validate(response.json())
+    assert data.room_id == "room_B"
 
 
 def test_submit_task_invalid_room_id(seeded_client):

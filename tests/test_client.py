@@ -625,6 +625,8 @@ def test_sio_handlers_not_registered_without_tsio(api, client):
 
 def test_provider_request_handler_dispatches_read(api, client, fs_provider):
     """ProviderRequest handler should call read() and POST result back."""
+    from zndraw_joblib.dependencies import request_hash as compute_hash
+
     mock_tsio = MagicMock()
     manager = JobManager(api, tsio=mock_tsio)
 
@@ -633,13 +635,16 @@ def test_provider_request_handler_dispatches_read(api, client, fs_provider):
 
     manager.register_provider(fs_provider, name="local", handler=mock_handler)
 
-    # Trigger a read via the REST endpoint to get request_hash and inflight
+    params = {"path": "/data"}
+    rhash = compute_hash(params)
+
+    # Trigger a read to dispatch (times out immediately with wait=0)
     read_resp = client.get(
         "/v1/joblib/rooms/@global/providers/@global:filesystem:local",
-        params={"path": "/data"},
+        params=params,
+        headers={"Prefer": "wait=0"},
     )
-    assert read_resp.status_code == 202
-    request_hash = read_resp.json()["request_hash"]
+    assert read_resp.status_code == 404
 
     # Capture the registered handler callback (registered in __init__)
     pr_calls = [c for c in mock_tsio.on.call_args_list if c[0][0] is ProviderRequest]
@@ -647,9 +652,9 @@ def test_provider_request_handler_dispatches_read(api, client, fs_provider):
 
     # Simulate incoming ProviderRequest (as the server would dispatch)
     event = ProviderRequest.from_dict_params(
-        request_id=request_hash,
+        request_id=rhash,
         provider_name="@global:filesystem:local",
-        params={"path": "/data"},
+        params=params,
     )
     callback(event)
 
@@ -659,7 +664,7 @@ def test_provider_request_handler_dispatches_read(api, client, fs_provider):
     # Verify result is now cached on the server
     cached_resp = client.get(
         "/v1/joblib/rooms/@global/providers/@global:filesystem:local",
-        params={"path": "/data"},
+        params=params,
     )
     assert cached_resp.status_code == 200
     assert cached_resp.json() == [{"name": "file.xyz", "size": 42}]
