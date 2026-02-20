@@ -39,7 +39,7 @@ from zndraw_joblib.exceptions import (
     JobNotFound,
     ProblemException,
     ProviderNotFound,
-    ProviderTimeoutError,
+    ProviderTimeoutError as ProviderTimeoutError,
     SchemaConflict,
     TaskNotFound,
     WorkerNotFound,
