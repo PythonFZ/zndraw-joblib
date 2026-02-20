@@ -1563,7 +1563,7 @@ wheels = [
 
 [[package]]
 name = "zndraw-auth"
-version = "0.2.1"
+version = "0.2.2"
 source = { editable = "../zndraw-auth" }
 dependencies = [
     { name = "aiosqlite" },
@@ -1592,7 +1592,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "zndraw-joblib"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
