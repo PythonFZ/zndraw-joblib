@@ -2,7 +2,7 @@
 """RFC 9457 Problem Details for HTTP APIs."""
 
 import re
-from typing import ClassVar
+from typing import ClassVar, NoReturn
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -35,6 +35,10 @@ class ProblemException(Exception):
         self.problem = problem
         self.headers = headers
         super().__init__(problem.title)
+
+
+class ProviderTimeoutError(Exception):
+    """Raised on the client side when a provider does not respond in time."""
 
 
 class ProblemType:
@@ -167,3 +171,7 @@ class ProviderTimeout(ProblemType):
 
     title: ClassVar[str] = "Gateway Timeout"
     status: ClassVar[int] = 504
+
+    @classmethod
+    def raise_for_client(cls, problem: "ProblemDetail") -> NoReturn:
+        raise ProviderTimeoutError(problem.detail or problem.title)

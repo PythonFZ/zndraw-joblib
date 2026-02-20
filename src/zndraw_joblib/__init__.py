@@ -39,6 +39,7 @@ from zndraw_joblib.exceptions import (
     JobNotFound,
     ProblemException,
     ProviderNotFound,
+    ProviderTimeoutError,
     SchemaConflict,
     TaskNotFound,
     WorkerNotFound,
@@ -105,6 +106,7 @@ __all__ = [
     "Forbidden",
     "InternalJobNotConfigured",
     "ProviderNotFound",
+    "ProviderTimeoutError",
     # Schemas
     "PaginatedResponse",
     # Settings
