@@ -29,7 +29,6 @@ class ConcreteExtension(Extension):
         pass
 
 
-
 def test_category_enum():
     """Category enum should have correct values."""
     assert Category.MODIFIER.value == "modifiers"
@@ -644,7 +643,7 @@ def test_provider_request_handler_dispatches_read(api, client, fs_provider):
         params=params,
         headers={"Prefer": "wait=0"},
     )
-    assert read_resp.status_code == 404
+    assert read_resp.status_code == 504
 
     # Capture the registered handler callback (registered in __init__)
     pr_calls = [c for c in mock_tsio.on.call_args_list if c[0][0] is ProviderRequest]

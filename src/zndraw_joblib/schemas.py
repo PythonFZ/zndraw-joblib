@@ -130,5 +130,3 @@ class ProviderResponse(BaseModel):
             worker_id=record.worker_id,
             created_at=record.created_at,
         )
-
-

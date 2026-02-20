@@ -655,7 +655,6 @@ class JobManager:
                 event.provider_name,
                 event.request_id,
             )
-            traceback.print_exc()
             self._log_to_room(
                 reg.room_id,
                 f"Provider `{event.provider_name}` read failed for "

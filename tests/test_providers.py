@@ -1,6 +1,7 @@
 # tests/test_providers.py
 """Tests for provider system endpoints."""
 
+import asyncio
 import json
 import uuid
 
@@ -177,19 +178,19 @@ def test_get_provider_info_room_visibility(client):
     assert resp.status_code == 404
 
 
-# --- Data Read (long-poll / 200 / 404) ---
+# --- Data Read (long-poll / 200 / 504) ---
 
 IMMEDIATE = {"Prefer": "wait=0"}
 
 
 def test_read_provider_timeout(client):
-    """No cached result + immediate timeout → 404 with Retry-After."""
+    """No cached result + immediate timeout → 504 with Retry-After."""
     _register_provider(client)
     resp = client.get(
         "/v1/joblib/rooms/@global/providers/@global:filesystem:local?path=/data",
         headers=IMMEDIATE,
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 504
     assert resp.headers["content-type"] == "application/problem+json"
     assert "Retry-After" in resp.headers
 
@@ -237,7 +238,7 @@ def test_read_provider_inflight_coalescing(client):
         params=params,
         headers=IMMEDIATE,
     )
-    assert resp1.status_code == 404
+    assert resp1.status_code == 504
 
     # Second read also times out (inflight already acquired, no re-dispatch)
     resp2 = client.get(
@@ -245,7 +246,7 @@ def test_read_provider_inflight_coalescing(client):
         params=params,
         headers=IMMEDIATE,
     )
-    assert resp2.status_code == 404
+    assert resp2.status_code == 504
 
 
 def test_read_provider_cache_hit_skips_long_poll(client):
@@ -271,6 +272,45 @@ def test_read_provider_cache_hit_skips_long_poll(client):
     )
     assert resp.status_code == 200
     assert "Preference-Applied" not in resp.headers
+
+
+async def test_read_provider_long_poll_wakes_on_upload(async_client):
+    """Result uploaded during active long-poll wakes the waiter and returns 200."""
+    # Register provider
+    reg_resp = await async_client.put(
+        "/v1/joblib/rooms/@global/providers",
+        json={"category": "filesystem", "name": "local", "schema": {}},
+    )
+    assert reg_resp.status_code == 201
+    provider_id = reg_resp.json()["id"]
+
+    params = {"path": "/data"}
+    rhash = request_hash(params)
+    payload = json.dumps({"files": ["a.xyz"]}).encode()
+
+    async def upload_after_delay():
+        await asyncio.sleep(0.1)
+        resp = await async_client.post(
+            f"/v1/joblib/providers/{provider_id}/results",
+            content=payload,
+            headers={"X-Request-Hash": rhash},
+        )
+        assert resp.status_code == 204
+
+    # Long-poll with 5s timeout; upload arrives after 100ms
+    read_task = asyncio.create_task(
+        async_client.get(
+            "/v1/joblib/rooms/@global/providers/@global:filesystem:local",
+            params=params,
+            headers={"Prefer": "wait=5"},
+        )
+    )
+    upload_task = asyncio.create_task(upload_after_delay())
+
+    read_resp, _ = await asyncio.gather(read_task, upload_task)
+    assert read_resp.status_code == 200
+    assert read_resp.json() == {"files": ["a.xyz"]}
+    assert "Preference-Applied" in read_resp.headers
 
 
 # --- Delete ---

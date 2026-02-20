@@ -12,7 +12,12 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
-from zndraw_auth import User, current_active_user, current_superuser, current_user_scoped_session
+from zndraw_auth import (
+    User,
+    current_active_user,
+    current_superuser,
+    current_user_scoped_session,
+)
 from zndraw_auth.db import SessionDep, get_session_maker
 from zndraw_socketio import AsyncServerWrapper
 
@@ -1100,7 +1105,6 @@ async def read_provider(
     room_id: str,
     provider_name: str,
     request: Request,
-    response: Response,
     session_maker: SessionMakerDep,
     current_user: CurrentUserFactoryDep,
     result_backend: ResultBackendDep,
@@ -1154,9 +1158,12 @@ async def read_provider(
 
     result = await result_backend.wait_for_key(cache_key, timeout)
     if result is not None:
+        headers = {}
         if requested_wait is not None:
-            response.headers["Preference-Applied"] = f"wait={int(timeout)}"
-        return Response(content=result, media_type=provider.content_type)
+            headers["Preference-Applied"] = f"wait={int(timeout)}"
+        return Response(
+            content=result, media_type=provider.content_type, headers=headers
+        )
 
     # Timeout — RFC 9457 error with retry guidance
     raise ProviderTimeout.exception(

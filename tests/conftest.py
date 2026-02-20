@@ -193,7 +193,11 @@ def _build_app(
     current_user,
 ) -> FastAPI:
     """Build a configured FastAPI app with standard dependency overrides."""
-    from zndraw_auth import current_active_user, current_superuser
+    from zndraw_auth import (
+        current_active_user,
+        current_superuser,
+        current_user_scoped_session,
+    )
     from zndraw_auth.db import get_session_maker
 
     app = FastAPI()
@@ -202,6 +206,7 @@ def _build_app(
     app.dependency_overrides[get_session_maker] = lambda: session_maker
     app.dependency_overrides[current_active_user] = current_user
     app.dependency_overrides[current_superuser] = current_user
+    app.dependency_overrides[current_user_scoped_session] = current_user
     app.state.joblib_settings = JobLibSettings()
     result_backend = InMemoryResultBackend()
     app.dependency_overrides[get_result_backend] = lambda: result_backend

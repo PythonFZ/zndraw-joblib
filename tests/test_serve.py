@@ -260,7 +260,9 @@ def test_context_manager_stops_threads(mock_client_api, client):
 # ---------------------------------------------------------------------------
 
 
-def test_e2e_job_and_provider_lifecycle(mock_client_api, fs_provider, threadsafe_client):
+def test_e2e_job_and_provider_lifecycle(
+    mock_client_api, fs_provider, threadsafe_client
+):
     """Full e2e: register job + provider, submit task → auto-executed,
     read provider → dispatched and cached."""
     executed = threading.Event()
@@ -309,12 +311,10 @@ def test_e2e_job_and_provider_lifecycle(mock_client_api, fs_provider, threadsafe
         params=params,
         headers={"Prefer": "wait=0"},
     )
-    assert read_resp.status_code == 404
+    assert read_resp.status_code == 504
 
     # Get the ProviderRequest handler from __init__
-    pr_calls = [
-        c for c in mock_tsio.on.call_args_list if c[0][0] is ProviderRequest
-    ]
+    pr_calls = [c for c in mock_tsio.on.call_args_list if c[0][0] is ProviderRequest]
     pr_callback = pr_calls[0][0][1]
 
     # Simulate server dispatching the event
