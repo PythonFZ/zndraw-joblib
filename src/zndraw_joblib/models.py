@@ -57,7 +57,7 @@ class Job(Base):
     schema_: Mapped[dict[str, Any]] = mapped_column("schema", JSON, default=dict)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         server_default=func.now(),
         index=True,
@@ -82,10 +82,10 @@ class Worker(Base):
         ForeignKey("user.id", ondelete="CASCADE"), index=True
     )
     last_heartbeat: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), index=True
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         server_default=func.now(),
         index=True,
@@ -121,7 +121,7 @@ class ProviderRecord(Base):
         ForeignKey("worker.id", ondelete="CASCADE"), index=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         server_default=func.now(),
         index=True,
@@ -160,12 +160,12 @@ class Task(Base):
     status: Mapped[TaskStatus] = mapped_column(default=TaskStatus.PENDING, index=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, default=None, nullable=True
+        DateTime(timezone=True), default=None, nullable=True
     )
     completed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, default=None, nullable=True
+        DateTime(timezone=True), default=None, nullable=True
     )
     error: Mapped[Optional[str]] = mapped_column(Text, default=None, nullable=True)
