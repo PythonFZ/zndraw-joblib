@@ -85,25 +85,19 @@ def register_internal_tasks(
     return registry
 
 
-async def register_internal_jobs(
-    app: "FastAPI",
-    broker: AsyncBroker,
+async def ensure_internal_jobs(
     extensions: list[type[Extension]],
-    executor: InternalExecutor,
     session_factory: "Callable[[], AbstractAsyncContextManager[AsyncSession]]",
 ) -> None:
-    """Register internal extensions for server-side execution.
+    """Create or update @internal Job rows in the database.
 
-    Does three things:
-    1. Registers each Extension as a taskiq task on the broker
-    2. Creates/reactivates @internal:category:name Job rows in the DB
-    3. Stores the InternalRegistry on app.state.internal_registry
+    Idempotent — safe to call on every startup. For production with multiple
+    replicas, call once from ``init_database()`` / ``zndraw-db`` to avoid
+    race conditions on the ``unique_job`` constraint.
     """
     from sqlalchemy import select
 
     from zndraw_joblib.models import Job
-
-    registry = register_internal_tasks(broker, extensions, executor)
 
     async with session_factory() as session:
         for ext_cls in extensions:
@@ -126,15 +120,34 @@ async def register_internal_jobs(
             elif existing:
                 existing.schema_ = schema
             else:
-                job = Job(
-                    room_id="@internal",
-                    category=category,
-                    name=name,
-                    schema_=schema,
+                session.add(
+                    Job(
+                        room_id="@internal",
+                        category=category,
+                        name=name,
+                        schema_=schema,
+                    )
                 )
-                session.add(job)
 
         await session.commit()
 
+    logger.info("Ensured %d @internal job row(s) in DB", len(extensions))
+
+
+async def register_internal_jobs(
+    app: "FastAPI",
+    broker: AsyncBroker,
+    extensions: list[type[Extension]],
+    executor: InternalExecutor,
+    session_factory: "Callable[[], AbstractAsyncContextManager[AsyncSession]]",
+) -> None:
+    """Register internal extensions for server-side execution.
+
+    Does three things:
+    1. Registers each Extension as a taskiq task on the broker
+    2. Creates/reactivates @internal:category:name Job rows in the DB
+    3. Stores the InternalRegistry on app.state.internal_registry
+    """
+    registry = register_internal_tasks(broker, extensions, executor)
+    await ensure_internal_jobs(extensions, session_factory)
     app.state.internal_registry = registry
-    logger.info("Internal jobs registered in DB and attached to app.state")
