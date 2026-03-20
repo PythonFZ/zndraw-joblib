@@ -1,0 +1,56 @@
+site_name: zndraw-joblib
+site_description: Developer documentation for the zndraw-joblib distributed job/task management package
+repo_url: https://github.com/zincware/zndraw-joblib
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+exclude_docs: |
+  plans/
+
+nav:
+  - Overview: index.md
+  - Concepts:
+      - Architecture: concepts/architecture.md
+      - Jobs & Tasks: concepts/jobs-and-tasks.md
+      - Workers: concepts/workers.md
+      - Providers: concepts/providers.md
+      - Events: concepts/events.md
+      - Sweeper: concepts/sweeper.md
+  - Integration Guide: integration.md
