@@ -1,0 +1,1262 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Developer documentation for the zndraw-joblib distributed job/task management package">
+      
+      
+      
+      
+        <link rel="prev" href="../jobs-and-tasks/">
+      
+      
+        <link rel="next" href="../providers/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Workers - zndraw-joblib</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#workers" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="zndraw-joblib" class="md-header__button md-logo" aria-label="zndraw-joblib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            zndraw-joblib
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Workers
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/zincware/zndraw-joblib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="zndraw-joblib" class="md-nav__button md-logo" aria-label="zndraw-joblib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    zndraw-joblib
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/zincware/zndraw-joblib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../jobs-and-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jobs & Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worker-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-serve-vs-manual-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Serve vs Manual Mode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Auto-Serve vs Manual Mode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#auto-serve-execute-callback-provided" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-serve (execute callback provided)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-mode-no-execute-callback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual mode (no execute callback)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#threading-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threading Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#socketio-wakeup-vs-polling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Socket.IO Wakeup vs Polling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worker-auto-creation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker Auto-Creation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#graceful-vs-abrupt-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graceful vs Abrupt Shutdown
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Graceful vs Abrupt Shutdown">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#graceful-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graceful shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#abrupt-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Abrupt shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disconnect-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disconnect Scenarios
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#apimanager-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ApiManager Protocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-side-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-Side Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sweeper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sweeper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worker-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-serve-vs-manual-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Serve vs Manual Mode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Auto-Serve vs Manual Mode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#auto-serve-execute-callback-provided" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-serve (execute callback provided)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-mode-no-execute-callback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual mode (no execute callback)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#threading-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threading Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#socketio-wakeup-vs-polling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Socket.IO Wakeup vs Polling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worker-auto-creation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker Auto-Creation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#graceful-vs-abrupt-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graceful vs Abrupt Shutdown
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Graceful vs Abrupt Shutdown">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#graceful-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graceful shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#abrupt-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Abrupt shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disconnect-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disconnect Scenarios
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#apimanager-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ApiManager Protocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-side-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-Side Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="workers">Workers<a class="headerlink" href="#workers" title="Permanent link">&para;</a></h1>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>Remote workers are external Python processes that use the <code>JobManager</code> client SDK to:</p>
+<ol>
+<li>Register <code>Extension</code> classes as jobs on the server</li>
+<li>Claim and execute tasks</li>
+<li>Send heartbeats to stay alive</li>
+<li>Disconnect gracefully or be cleaned up by the sweeper</li>
+</ol>
+<p>Workers communicate with the server via REST (<code>httpx</code>) and optionally Socket.IO (for real-time task notifications). All HTTP calls go through an <code>ApiManager</code> protocol object that handles authentication headers and error responses.</p>
+<h2 id="worker-lifecycle">Worker Lifecycle<a class="headerlink" href="#worker-lifecycle" title="Permanent link">&para;</a></h2>
+<p>The full lifecycle of a remote worker, from creation through task execution to shutdown:</p>
+<pre class="mermaid"><code>sequenceDiagram
+    participant W as Worker (JobManager)
+    participant S as Server (FastAPI)
+    participant SIO as Socket.IO
+
+    Note over W: JobManager created with&lt;br/&gt;ApiManager + optional SIO +&lt;br/&gt;optional execute callback
+
+    W-&gt;&gt;S: PUT /rooms/{room_id}/jobs&lt;br/&gt;(JobRegisterRequest with worker_id=None)
+    S-&gt;&gt;S: Create Worker record&lt;br/&gt;+ Job record&lt;br/&gt;+ WorkerJobLink
+    S--&gt;&gt;W: JobResponse (includes worker_id)
+    Note over W: Client captures worker_id&lt;br/&gt;from response
+
+    W-&gt;&gt;SIO: emit JoinJobRoom(job_name, worker_id)
+    Note over SIO: Worker joins room&lt;br/&gt;"jobs:{full_name}"
+
+    Note over W: _ensure_background_threads()
+
+    loop Heartbeat thread (every heartbeat_interval)
+        W-&gt;&gt;S: PATCH /workers/{worker_id}
+        S--&gt;&gt;W: WorkerResponse (updated last_heartbeat)
+    end
+
+    loop Claim loop thread (auto-serve only)
+        W-&gt;&gt;S: POST /tasks/claim {worker_id}
+        S--&gt;&gt;W: TaskClaimResponse
+        alt Task claimed
+            W-&gt;&gt;S: PATCH /tasks/{id} {status: running}
+            Note over W: execute(ClaimedTask)
+            W-&gt;&gt;S: PATCH /tasks/{id} {status: completed}
+        else No task available
+            Note over W: Wait on _task_ready event&lt;br/&gt;with polling_interval timeout
+        end
+    end
+
+    Note over W: disconnect() called
+    W-&gt;&gt;SIO: emit LeaveJobRoom(job_name, worker_id)
+    W-&gt;&gt;S: DELETE /workers/{worker_id}
+    S-&gt;&gt;S: Fail claimed/running tasks&lt;br/&gt;Remove WorkerJobLinks&lt;br/&gt;Soft-delete orphan jobs</code></pre>
+<h2 id="auto-serve-vs-manual-mode">Auto-Serve vs Manual Mode<a class="headerlink" href="#auto-serve-vs-manual-mode" title="Permanent link">&para;</a></h2>
+<h3 id="auto-serve-execute-callback-provided">Auto-serve (execute callback provided)<a class="headerlink" href="#auto-serve-execute-callback-provided" title="Permanent link">&para;</a></h3>
+<p>When an <code>execute</code> callback is provided to <code>JobManager</code>, two daemon threads start automatically on the first <code>register()</code> call:</p>
+<ul>
+<li><strong>Heartbeat thread</strong> -- sends <code>PATCH /workers/{id}</code> every <code>heartbeat_interval</code> seconds (default 30s)</li>
+<li><strong>Claim loop thread</strong> -- continuously claims tasks via <code>POST /tasks/claim</code>, transitions them through <code>start() -&gt; execute(ClaimedTask) -&gt; complete()</code>, and on exception calls <code>fail(task, error)</code></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">my_execute</span><span class="p">(</span><span class="n">task</span><span class="p">:</span> <span class="n">ClaimedTask</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">task</span><span class="o">.</span><span class="n">extension</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">vis</span><span class="p">)</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">with</span> <span class="n">JobManager</span><span class="p">(</span><span class="n">api</span><span class="p">,</span> <span class="n">tsio</span><span class="p">,</span> <span class="n">execute</span><span class="o">=</span><span class="n">my_execute</span><span class="p">)</span> <span class="k">as</span> <span class="n">manager</span><span class="p">:</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="nd">@manager</span><span class="o">.</span><span class="n">register</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="k">class</span><span class="w"> </span><span class="nc">Rotate</span><span class="p">(</span><span class="n">Extension</span><span class="p">):</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="n">category</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="n">Category</span><span class="p">]</span> <span class="o">=</span> <span class="n">Category</span><span class="o">.</span><span class="n">MODIFIER</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="n">angle</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vis</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>            <span class="c1"># extension logic</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>            <span class="o">...</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">manager</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>  <span class="c1"># blocks until SIGINT/SIGTERM</span>
+</code></pre></div>
+<h3 id="manual-mode-no-execute-callback">Manual mode (no execute callback)<a class="headerlink" href="#manual-mode-no-execute-callback" title="Permanent link">&para;</a></h3>
+<p>Only the heartbeat thread runs. The caller uses <code>claim()</code> for single claims or <code>listen()</code> as a generator:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">with</span> <span class="n">JobManager</span><span class="p">(</span><span class="n">api</span><span class="p">,</span> <span class="n">tsio</span><span class="p">)</span> <span class="k">as</span> <span class="n">manager</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="nd">@manager</span><span class="o">.</span><span class="n">register</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">class</span><span class="w"> </span><span class="nc">Rotate</span><span class="p">(</span><span class="n">Extension</span><span class="p">):</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        <span class="n">category</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="n">Category</span><span class="p">]</span> <span class="o">=</span> <span class="n">Category</span><span class="o">.</span><span class="n">MODIFIER</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        <span class="n">angle</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vis</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>            <span class="o">...</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">manager</span><span class="o">.</span><span class="n">listen</span><span class="p">(</span><span class="n">polling_interval</span><span class="o">=</span><span class="mf">2.0</span><span class="p">):</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>        <span class="n">manager</span><span class="o">.</span><span class="n">start</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>            <span class="n">task</span><span class="o">.</span><span class="n">extension</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">vis</span><span class="p">)</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>            <span class="n">manager</span><span class="o">.</span><span class="n">complete</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>            <span class="n">manager</span><span class="o">.</span><span class="n">fail</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
+</code></pre></div>
+<h3 id="threading-model">Threading Model<a class="headerlink" href="#threading-model" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>flowchart TD
+    subgraph MainThread["Main Thread"]
+        R["register()"] --&gt; W["wait()"]
+        W --&gt; D["disconnect()"]
+    end
+
+    subgraph HB["Heartbeat Thread (daemon)"]
+        HB1["sleep(heartbeat_interval)"] --&gt; HB2["PATCH /workers/{id}"]
+        HB2 --&gt; HB3{_stop set?}
+        HB3 -- No --&gt; HB1
+        HB3 -- Yes --&gt; HB4["exit"]
+    end
+
+    subgraph CL["Claim Loop Thread (daemon, auto-serve only)"]
+        CL1["POST /tasks/claim"] --&gt; CL2{Task returned?}
+        CL2 -- Yes --&gt; CL3["start() -&gt; execute() -&gt; complete()/fail()"]
+        CL3 --&gt; CL5{_stop set?}
+        CL2 -- No --&gt; CL4["wait on _task_ready event\n(timeout=polling_interval)"]
+        CL4 --&gt; CL5
+        CL5 -- No --&gt; CL1
+        CL5 -- Yes --&gt; CL6["exit"]
+    end
+
+    R -. "starts" .-&gt; HB1
+    R -. "starts (if execute)" .-&gt; CL1
+    D -. "sets _stop event" .-&gt; HB3
+    D -. "sets _stop + _task_ready" .-&gt; CL5</code></pre>
+<h2 id="socketio-wakeup-vs-polling">Socket.IO Wakeup vs Polling<a class="headerlink" href="#socketio-wakeup-vs-polling" title="Permanent link">&para;</a></h2>
+<p>When Socket.IO is connected, the server broadcasts a <code>TaskAvailable</code> event to the <code>jobs:{full_name}</code> room whenever a task is submitted. The client's <code>_on_task_available</code> handler sets the <code>_task_ready</code> threading.Event, immediately waking the claim loop from its sleep.</p>
+<p>Without Socket.IO (or if the event is lost), the claim loop falls back to polling every <code>polling_interval</code> seconds (default 2s). No tasks are missed -- the next poll iteration will find the pending task. The only difference is latency.</p>
+<p>The claim loop logic:</p>
+<ol>
+<li>Call <code>POST /tasks/claim</code></li>
+<li>If a task is returned, execute it immediately and loop back to step 1</li>
+<li>If no task is available, call <code>_task_ready.wait(timeout=polling_interval)</code></li>
+<li>If <code>_task_ready</code> was set by a Socket.IO event, the wait returns immediately</li>
+<li>If the timeout expires, loop back to step 1 (polling fallback)</li>
+</ol>
+<h2 id="worker-auto-creation">Worker Auto-Creation<a class="headerlink" href="#worker-auto-creation" title="Permanent link">&para;</a></h2>
+<p>Workers can be created in two ways:</p>
+<p><strong>Explicit creation</strong> via <code>create_worker()</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">worker_id</span> <span class="o">=</span> <span class="n">manager</span><span class="o">.</span><span class="n">create_worker</span><span class="p">()</span>  <span class="c1"># POST /workers</span>
+</code></pre></div>
+<p><strong>Implicit creation</strong> during <code>register()</code>: if <code>worker_id</code> is <code>None</code> in the <code>JobRegisterRequest</code>, the server auto-creates a <code>Worker</code> record linked to the authenticated user and returns its ID in the <code>JobResponse</code>. The client captures this ID and reuses it for all subsequent <code>register()</code> calls.</p>
+<p>In both cases, the server creates:</p>
+<ul>
+<li>A <code>Worker</code> row linked to the authenticated user's ID</li>
+<li>A <code>WorkerJobLink</code> row connecting the worker to each registered job</li>
+</ul>
+<p>Multiple jobs can share the same worker. The claim endpoint (<code>POST /tasks/claim</code>) finds the oldest pending task across all jobs linked to that worker.</p>
+<h2 id="graceful-vs-abrupt-shutdown">Graceful vs Abrupt Shutdown<a class="headerlink" href="#graceful-vs-abrupt-shutdown" title="Permanent link">&para;</a></h2>
+<h3 id="graceful-shutdown">Graceful shutdown<a class="headerlink" href="#graceful-shutdown" title="Permanent link">&para;</a></h3>
+<p>Using the context manager (<code>with manager:</code>) or receiving SIGINT/SIGTERM triggers <code>disconnect()</code>, which executes in order:</p>
+<ol>
+<li>Sets <code>_stop</code> event to signal threads to exit their loops</li>
+<li>Sets <code>_task_ready</code> to wake the claim loop if it is sleeping</li>
+<li>Joins all threads with a 10s timeout (waits for in-flight tasks to finish)</li>
+<li>Emits <code>LeaveProviderRoom</code> / <code>LeaveJobRoom</code> via Socket.IO</li>
+<li>Sends <code>DELETE /workers/{id}</code> -- the server fails claimed/running tasks, removes <code>WorkerJobLink</code> rows, and soft-deletes orphan jobs</li>
+<li>Clears local registry state</li>
+</ol>
+<p>The <code>wait()</code> method blocks on the <code>_stop</code> event. When called from the main thread, it installs <code>SIGINT</code>/<code>SIGTERM</code> handlers that call <code>disconnect()</code> and restores the original handlers on exit.</p>
+<h3 id="abrupt-shutdown">Abrupt shutdown<a class="headerlink" href="#abrupt-shutdown" title="Permanent link">&para;</a></h3>
+<p>When a worker process is killed without cleanup (e.g., <code>kill -9</code>, OOM, network partition):</p>
+<ul>
+<li>Daemon threads die with the process</li>
+<li>The worker's heartbeat timestamp stops updating</li>
+<li>The server-side sweeper detects the stale heartbeat after <code>worker_timeout_seconds</code> (default 60s)</li>
+<li>The sweeper calls <code>cleanup_worker()</code>: fails tasks, removes links, soft-deletes orphan jobs</li>
+<li>If Socket.IO was connected, the server-side disconnect handler can trigger immediate cleanup (this is a host app responsibility)</li>
+</ul>
+<h3 id="disconnect-scenarios">Disconnect Scenarios<a class="headerlink" href="#disconnect-scenarios" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Handler</th>
+<th>Latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Graceful shutdown (<code>with manager:</code>)</td>
+<td>Client <code>disconnect()</code> -&gt; <code>DELETE /workers/{id}</code></td>
+<td>Immediate</td>
+</tr>
+<tr>
+<td>SIGINT / SIGTERM</td>
+<td>Signal handler -&gt; <code>disconnect()</code></td>
+<td>Immediate</td>
+</tr>
+<tr>
+<td>Network drop with Socket.IO</td>
+<td>Server-side SIO disconnect handler</td>
+<td>Seconds</td>
+</tr>
+<tr>
+<td>Process kill / REST-only worker</td>
+<td>Sweeper heartbeat timeout</td>
+<td>Up to <code>worker_timeout_seconds</code> (default 60s)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="apimanager-protocol">ApiManager Protocol<a class="headerlink" href="#apimanager-protocol" title="Permanent link">&para;</a></h2>
+<p>The host application must provide an object matching the <code>ApiManager</code> protocol to <code>JobManager</code>. This decouples the worker SDK from any specific authentication or HTTP client configuration:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ApiManager</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">http</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Client</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_headers</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="nd">@property</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">base_url</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">raise_for_status</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">response</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Response</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Member</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>http</code></td>
+<td>Thread-safe <code>httpx.Client</code> instance for all REST calls</td>
+</tr>
+<tr>
+<td><code>get_headers()</code></td>
+<td>Returns auth headers (e.g., <code>{"Authorization": "Bearer &lt;token&gt;"}</code>)</td>
+</tr>
+<tr>
+<td><code>base_url</code></td>
+<td>Server base URL (e.g., <code>https://app.example.com</code>)</td>
+</tr>
+<tr>
+<td><code>raise_for_status(response)</code></td>
+<td>Error handling strategy -- raise on non-2xx, log, or custom logic</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>JobManager</code> calls <code>api.get_headers()</code> on every request, so token refresh logic can be implemented transparently inside <code>get_headers()</code>.</p>
+<h2 id="server-side-cleanup">Server-Side Cleanup<a class="headerlink" href="#server-side-cleanup" title="Permanent link">&para;</a></h2>
+<p>When the server receives <code>DELETE /workers/{id}</code> (or the sweeper detects a stale worker), the <code>cleanup_worker()</code> function in <code>sweeper.py</code> performs:</p>
+<ol>
+<li><strong>Fail active tasks</strong> -- all tasks in <code>CLAIMED</code> or <code>RUNNING</code> status owned by the worker are transitioned to <code>FAILED</code> with error <code>"Worker disconnected"</code></li>
+<li><strong>Remove links</strong> -- all <code>WorkerJobLink</code> rows for the worker are deleted</li>
+<li><strong>Delete providers</strong> -- all <code>ProviderRecord</code> rows owned by the worker are deleted</li>
+<li><strong>Delete worker</strong> -- the <code>Worker</code> row itself is removed</li>
+<li><strong>Orphan job cleanup</strong> -- for each job that was linked to the worker, check if the job has zero remaining workers and zero pending tasks; if so, soft-delete it (set <code>deleted=True</code>)</li>
+</ol>
+<p>All of this happens within a single transaction. Socket.IO emissions (<code>JobsInvalidate</code>, <code>TaskStatusEvent</code>, <code>ProvidersInvalidate</code>) are sent after commit to notify connected frontends.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

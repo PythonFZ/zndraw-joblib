@@ -1,0 +1,1406 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Developer documentation for the zndraw-joblib distributed job/task management package">
+      
+      
+      
+      
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../workers/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Jobs & Tasks - zndraw-joblib</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#jobs-and-tasks" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="zndraw-joblib" class="md-header__button md-logo" aria-label="zndraw-joblib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            zndraw-joblib
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Jobs & Tasks
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/zincware/zndraw-joblib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="zndraw-joblib" class="md-nav__button md-logo" aria-label="zndraw-joblib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    zndraw-joblib
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/zincware/zndraw-joblib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jobs & Tasks
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jobs & Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#job-naming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Job Naming
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Job Naming">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#room-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Room Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation Rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#database-constraint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Database Constraint
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#soft-deletion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Soft Deletion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#task-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task Lifecycle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Task Lifecycle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#valid-transitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Valid Transitions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#who-triggers-each-transition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who Triggers Each Transition
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#timestamps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timestamps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#optimistic-locking-task-claiming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optimistic Locking (Task Claiming)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Optimistic Locking (Task Claiming)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#algorithm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Algorithm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#race-condition-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Race Condition Sequence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sqlite-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQLite Considerations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#internal-job-dispatch-internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Internal Job Dispatch (@internal)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Internal Job Dispatch (@internal)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stuck-task-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stuck Task Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#queue-position" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queue Position
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#long-polling-get-tasksid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Long-Polling (GET /tasks/{id})
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sweeper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sweeper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#job-naming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Job Naming
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Job Naming">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#room-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Room Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation Rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#database-constraint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Database Constraint
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#soft-deletion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Soft Deletion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#task-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task Lifecycle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Task Lifecycle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#valid-transitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Valid Transitions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#who-triggers-each-transition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who Triggers Each Transition
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#timestamps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timestamps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#optimistic-locking-task-claiming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optimistic Locking (Task Claiming)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Optimistic Locking (Task Claiming)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#algorithm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Algorithm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#race-condition-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Race Condition Sequence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sqlite-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQLite Considerations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#internal-job-dispatch-internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Internal Job Dispatch (@internal)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Internal Job Dispatch (@internal)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stuck-task-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stuck Task Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#queue-position" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queue Position
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#long-polling-get-tasksid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Long-Polling (GET /tasks/{id})
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="jobs-and-tasks">Jobs and Tasks<a class="headerlink" href="#jobs-and-tasks" title="Permanent link">&para;</a></h1>
+<p>Jobs define <em>what</em> can be executed; tasks are individual <em>invocations</em> of a job.
+A job is a named, schema-validated function registered by a worker (or the server
+itself for internal jobs). A task carries a payload through a state machine from
+submission to completion.</p>
+<h2 id="job-naming">Job Naming<a class="headerlink" href="#job-naming" title="Permanent link">&para;</a></h2>
+<p>Every job has a <strong>full name</strong> built from three colon-delimited parts:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>{room_id}:{category}:{name}
+</code></pre></div>
+<p>For example: <code>@global:modifiers:Rotate</code>, <code>room_42:analysis:RDF</code>, <code>@internal:modifiers:CenterAtoms</code>.</p>
+<h3 id="room-types">Room Types<a class="headerlink" href="#room-types" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Room ID</th>
+<th>Scope</th>
+<th>Who can register</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>@global</code></td>
+<td>Visible to <strong>all</strong> rooms</td>
+<td>Superuser only</td>
+</tr>
+<tr>
+<td><code>@internal</code></td>
+<td>Server-side taskiq jobs, never claimed by remote workers</td>
+<td>Superuser only</td>
+</tr>
+<tr>
+<td>Any other string (e.g. <code>room_123</code>)</td>
+<td>Room-scoped, visible only from that room</td>
+<td>Any authenticated user</td>
+</tr>
+</tbody>
+</table>
+<h3 id="validation-rules">Validation Rules<a class="headerlink" href="#validation-rules" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>@</code> is reserved.</strong> Regular room IDs cannot contain <code>@</code>. The <code>validate_room_id()</code>
+  dependency enforces this, raising a <code>400 Bad Request</code> (RFC 9457 <code>InvalidRoomId</code>) for
+  any room ID containing <code>@</code> or <code>:</code> that is not exactly <code>@global</code> or <code>@internal</code>.</li>
+<li><strong><code>:</code> is the delimiter.</strong> Room IDs cannot contain <code>:</code> either, since that would make
+  the full name ambiguous.</li>
+<li><strong>Category allow-list.</strong> The category must appear in <code>settings.allowed_categories</code>
+  (default: <code>modifiers</code>, <code>selections</code>, <code>analysis</code>). Unrecognized categories return
+  <code>400 Bad Request</code> (<code>InvalidCategory</code>).</li>
+<li><strong>Schema conflict.</strong> If a job with the same <code>(room_id, category, name)</code> tuple
+  already exists and is active, the incoming schema must match exactly. A mismatch
+  returns <code>409 Conflict</code> (<code>SchemaConflict</code>). Different rooms can register the same
+  <code>category:name</code> combination with different schemas.</li>
+</ul>
+<h3 id="database-constraint">Database Constraint<a class="headerlink" href="#database-constraint" title="Permanent link">&para;</a></h3>
+<p>Jobs are stored with a <code>UniqueConstraint("room_id", "category", "name")</code> on the <code>job</code>
+table. The composite index on <code>(room_id, category, name)</code> enforces uniqueness at the
+database level.</p>
+<h2 id="soft-deletion">Soft Deletion<a class="headerlink" href="#soft-deletion" title="Permanent link">&para;</a></h2>
+<p>Jobs are <strong>never hard-deleted</strong>. When a job loses all its workers and has no pending
+tasks, the sweeper (or the task-update endpoint) marks it <code>deleted=True</code>. This
+preserves the full task history for completed, failed, and cancelled tasks.</p>
+<p>Re-registering a soft-deleted job reactivates it (<code>deleted=False</code>) and replaces the
+schema with the one provided in the new registration request.</p>
+<p><code>@internal</code> jobs are exempt from orphan cleanup -- they are registered at server
+startup and remain active regardless of worker count.</p>
+<h2 id="task-lifecycle">Task Lifecycle<a class="headerlink" href="#task-lifecycle" title="Permanent link">&para;</a></h2>
+<p>Each task progresses through a state machine. Terminal states are final -- no further
+transitions are allowed.</p>
+<pre class="mermaid"><code>stateDiagram-v2
+    [*] --&gt; PENDING : submit_task
+
+    PENDING --&gt; CLAIMED : Worker claims (POST /tasks/claim)\nor automatic for @internal
+    PENDING --&gt; CANCELLED : User cancels before claim
+
+    CLAIMED --&gt; RUNNING : Worker starts execution\n(PATCH /tasks/{id} status=running)
+    CLAIMED --&gt; FAILED : Worker disconnects\nor sweeper timeout
+    CLAIMED --&gt; CANCELLED : User or admin cancels
+
+    RUNNING --&gt; COMPLETED : Worker reports success\n(PATCH /tasks/{id} status=completed)
+    RUNNING --&gt; FAILED : Worker reports error,\nworker disconnects,\nor sweeper timeout
+    RUNNING --&gt; CANCELLED : User or admin cancels
+
+    COMPLETED --&gt; [*]
+    FAILED --&gt; [*]
+    CANCELLED --&gt; [*]</code></pre>
+<h3 id="valid-transitions">Valid Transitions<a class="headerlink" href="#valid-transitions" title="Permanent link">&para;</a></h3>
+<p>The server enforces the transition matrix defined in <code>router.py</code>:</p>
+<table>
+<thead>
+<tr>
+<th>From</th>
+<th>Allowed targets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PENDING</code></td>
+<td><code>CLAIMED</code>, <code>CANCELLED</code></td>
+</tr>
+<tr>
+<td><code>CLAIMED</code></td>
+<td><code>RUNNING</code>, <code>FAILED</code>, <code>CANCELLED</code></td>
+</tr>
+<tr>
+<td><code>RUNNING</code></td>
+<td><code>COMPLETED</code>, <code>FAILED</code>, <code>CANCELLED</code></td>
+</tr>
+<tr>
+<td><code>COMPLETED</code></td>
+<td><em>(none -- terminal)</em></td>
+</tr>
+<tr>
+<td><code>FAILED</code></td>
+<td><em>(none -- terminal)</em></td>
+</tr>
+<tr>
+<td><code>CANCELLED</code></td>
+<td><em>(none -- terminal)</em></td>
+</tr>
+</tbody>
+</table>
+<p>Any invalid transition returns <code>409 Conflict</code> (<code>InvalidTaskTransition</code>).</p>
+<h3 id="who-triggers-each-transition">Who Triggers Each Transition<a class="headerlink" href="#who-triggers-each-transition" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Transition</th>
+<th>Triggered by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PENDING -&gt; CLAIMED</td>
+<td><code>POST /tasks/claim</code> (remote worker) or automatic on submit for <code>@internal</code> jobs</td>
+</tr>
+<tr>
+<td>PENDING -&gt; CANCELLED</td>
+<td><code>PATCH /tasks/{id}</code> with <code>status=cancelled</code> (user or superuser)</td>
+</tr>
+<tr>
+<td>CLAIMED -&gt; RUNNING</td>
+<td><code>PATCH /tasks/{id}</code> with <code>status=running</code> (claiming worker)</td>
+</tr>
+<tr>
+<td>CLAIMED -&gt; FAILED</td>
+<td>Sweeper (worker heartbeat timeout) or <code>PATCH /tasks/{id}</code> (worker)</td>
+</tr>
+<tr>
+<td>CLAIMED -&gt; CANCELLED</td>
+<td><code>PATCH /tasks/{id}</code> with <code>status=cancelled</code> (user or superuser)</td>
+</tr>
+<tr>
+<td>RUNNING -&gt; COMPLETED</td>
+<td><code>PATCH /tasks/{id}</code> with <code>status=completed</code> (worker)</td>
+</tr>
+<tr>
+<td>RUNNING -&gt; FAILED</td>
+<td><code>PATCH /tasks/{id}</code> with <code>status=failed</code> (worker), or sweeper on disconnect</td>
+</tr>
+<tr>
+<td>RUNNING -&gt; CANCELLED</td>
+<td><code>PATCH /tasks/{id}</code> with <code>status=cancelled</code> (user or superuser)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="timestamps">Timestamps<a class="headerlink" href="#timestamps" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>created_at</code> -- set when the task row is inserted (PENDING).</li>
+<li><code>started_at</code> -- set when the task transitions to RUNNING.</li>
+<li><code>completed_at</code> -- set when the task reaches any terminal state (COMPLETED, FAILED, CANCELLED).</li>
+</ul>
+<h2 id="optimistic-locking-task-claiming">Optimistic Locking (Task Claiming)<a class="headerlink" href="#optimistic-locking-task-claiming" title="Permanent link">&para;</a></h2>
+<p>Multiple remote workers may compete to claim the same pending task. The server uses
+<strong>optimistic locking</strong> via an atomic SQL UPDATE to resolve the race without
+database-level row locks.</p>
+<h3 id="algorithm">Algorithm<a class="headerlink" href="#algorithm" title="Permanent link">&para;</a></h3>
+<p>When a remote worker calls <code>POST /tasks/claim</code>, the server:</p>
+<ol>
+<li><strong>SELECT</strong> the oldest PENDING task for the worker's registered jobs, using the
+   composite index <code>(job_id, status, created_at)</code>.</li>
+<li><strong>UPDATE</strong> atomically:
+   <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">UPDATE</span><span class="w"> </span><span class="n">task</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">SET</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;claimed&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">worker_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">:</span><span class="n">worker_id</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">:</span><span class="n">task_id</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;pending&#39;</span>
+</code></pre></div></li>
+<li><strong>Check <code>rowcount</code></strong>: if 1, the claim succeeded. If 0, another worker claimed it
+   between the SELECT and UPDATE.</li>
+<li><strong>On failure</strong>, apply exponential backoff with jitter and retry:
+   <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>delay = base_delay * 2^attempt * (0.5 + random())
+</code></pre></div>
+   Default: <code>base_delay = 0.01s</code> (10 ms), up to <code>claim_max_attempts = 10</code> retries.</li>
+<li>After all retries are exhausted, return <code>TaskClaimResponse(task=None)</code> -- no task
+   was available.</li>
+</ol>
+<h3 id="race-condition-sequence">Race Condition Sequence<a class="headerlink" href="#race-condition-sequence" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>sequenceDiagram
+    participant A as Worker A
+    participant S as Server
+    participant B as Worker B
+
+    A-&gt;&gt;S: POST /tasks/claim (worker_id=A)
+    B-&gt;&gt;S: POST /tasks/claim (worker_id=B)
+
+    Note over S: Both requests SELECT the same&lt;br/&gt;oldest PENDING task (id=42)
+
+    S-&gt;&gt;S: UPDATE task SET status='claimed'&lt;br/&gt;WHERE id=42 AND status='pending'&lt;br/&gt;(for Worker A)
+    Note over S: rowcount = 1 (success)
+
+    S-&gt;&gt;S: UPDATE task SET status='claimed'&lt;br/&gt;WHERE id=42 AND status='pending'&lt;br/&gt;(for Worker B)
+    Note over S: rowcount = 0 (already claimed)
+
+    S--&gt;&gt;A: 200 TaskClaimResponse(task=42)
+
+    Note over S: Worker B backs off:&lt;br/&gt;delay = 0.01 * 2^0 * (0.5 + rand())
+
+    S-&gt;&gt;S: Retry: SELECT next PENDING task (id=43)
+    S-&gt;&gt;S: UPDATE task SET status='claimed'&lt;br/&gt;WHERE id=43 AND status='pending'&lt;br/&gt;(for Worker B)
+    Note over S: rowcount = 1 (success)
+
+    S--&gt;&gt;B: 200 TaskClaimResponse(task=43)</code></pre>
+<h3 id="sqlite-considerations">SQLite Considerations<a class="headerlink" href="#sqlite-considerations" title="Permanent link">&para;</a></h3>
+<p>For SQLite deployments, database-level locking is a host app concern. The host app
+wraps the session maker with an <code>asyncio.Lock</code> to serialize all DB access, preventing
+<code>OperationalError: database is locked</code>. The claim loop catches <code>OperationalError</code>
+explicitly and retries with the same backoff strategy.</p>
+<h2 id="internal-job-dispatch-internal">Internal Job Dispatch (<code>@internal</code>)<a class="headerlink" href="#internal-job-dispatch-internal" title="Permanent link">&para;</a></h2>
+<p>For <code>@internal</code> jobs, the task does not enter the normal remote-worker claim flow.
+Instead, the server dispatches execution to a taskiq broker.</p>
+<h3 id="flow">Flow<a class="headerlink" href="#flow" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Validation.</strong> <code>submit_task</code> checks that the <code>InternalRegistry</code> (stored on
+   <code>app.state.internal_registry</code>) has a registered executor for this job's full name.
+   If not, returns <code>503 Service Unavailable</code> (<code>InternalJobNotConfigured</code>).</li>
+<li><strong>Create Task row.</strong> Inserts the task with <code>status=PENDING</code>.</li>
+<li><strong>Dispatch to broker.</strong> Calls <code>task_handle.kiq(task_id, room_id, payload)</code> to
+   enqueue the task on the taskiq broker (e.g. Redis).</li>
+<li><strong>On dispatch failure:</strong> marks the task <code>FAILED</code> immediately with
+   <code>error = "Failed to dispatch to internal executor"</code>.</li>
+<li><strong>On dispatch success:</strong> transitions the task to <code>CLAIMED</code>. The server takes
+   responsibility for execution -- no remote worker will attempt to claim it.</li>
+<li><strong>No <code>TaskAvailable</code> event.</strong> The Socket.IO <code>TaskAvailable</code> emission is skipped
+   because no remote workers need to be notified.</li>
+</ol>
+<p>The taskiq worker process (which may run in a separate container) consumes from the
+broker and invokes the registered <code>InternalExecutor</code> callback with the extension class,
+payload, room ID, and task ID.</p>
+<h3 id="stuck-task-cleanup">Stuck Task Cleanup<a class="headerlink" href="#stuck-task-cleanup" title="Permanent link">&para;</a></h3>
+<p>The sweeper periodically runs <code>cleanup_stuck_internal_tasks()</code>, which fails any
+<code>@internal</code> task stuck in RUNNING or CLAIMED longer than
+<code>settings.internal_task_timeout_seconds</code> (default: 3600s / 1 hour). These tasks are
+marked FAILED with <code>error = "Internal worker timeout"</code>.</p>
+<h2 id="queue-position">Queue Position<a class="headerlink" href="#queue-position" title="Permanent link">&para;</a></h2>
+<p>Pending tasks include a <code>queue_position</code> field that tells clients how many tasks are
+ahead of theirs in the queue for the same job. It is computed via an SQL window
+function:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">ROW_NUMBER</span><span class="p">()</span><span class="w"> </span><span class="n">OVER</span><span class="w"> </span><span class="p">(</span><span class="n">PARTITION</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">job_id</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">created_at</span><span class="w"> </span><span class="k">ASC</span><span class="p">)</span>
+</code></pre></div>
+<p>This partitions pending tasks by job and orders them by creation time, so the oldest
+pending task for a given job has <code>queue_position = 1</code>, the next has <code>2</code>, and so on.</p>
+<p>Tasks that are not in the PENDING state have <code>queue_position = null</code> -- the field is
+only meaningful while waiting in the queue.</p>
+<h2 id="long-polling-get-tasksid">Long-Polling (<code>GET /tasks/{id}</code>)<a class="headerlink" href="#long-polling-get-tasksid" title="Permanent link">&para;</a></h2>
+<p>Clients can poll for task completion using the <code>Prefer: wait=N</code> header (RFC 7240).
+When specified:</p>
+<ol>
+<li>The server checks if the task is already in a terminal state. If so, returns
+   immediately.</li>
+<li>Otherwise, it polls the database at increasing intervals (starting at 1s, growing
+   by 1.5x, capped at 5s) until the task reaches a terminal state or the wait time
+   expires.</li>
+<li>The effective wait is capped by <code>settings.long_poll_max_wait_seconds</code> (default: 60).</li>
+<li>The response includes a <code>Preference-Applied: wait=N</code> header confirming the
+   effective wait time.</li>
+</ol>
+<p>The endpoint uses a <strong>session factory</strong> (not the request-scoped session) to create
+short-lived sessions per poll iteration, avoiding holding a database connection open
+for the entire wait period.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
