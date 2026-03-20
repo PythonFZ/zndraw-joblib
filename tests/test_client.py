@@ -558,6 +558,20 @@ def test_job_manager_fail_transitions_to_failed_with_error(api, client):
     assert task.completed_at is not None
 
 
+def test_job_manager_fail_by_id(api, client):
+    """manager.fail_by_id(task_id, error) should fail a task without a ClaimedTask."""
+    manager, claimed = _register_claim(api, client)
+
+    manager.start(claimed)
+    manager.fail_by_id(claimed.task_id, "payload error")
+
+    resp = client.get(f"/v1/joblib/tasks/{claimed.task_id}")
+    task = TaskResponse.model_validate(resp.json())
+    assert task.status.value == "failed"
+    assert task.error == "payload error"
+    assert task.completed_at is not None
+
+
 def test_job_manager_cancel_from_claimed(api, client):
     """manager.cancel(task) should transition from CLAIMED to CANCELLED."""
     manager, claimed = _register_claim(api, client)
