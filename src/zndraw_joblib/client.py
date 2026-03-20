@@ -417,6 +417,10 @@ class JobManager:
         """Transition a running task to FAILED with an error message."""
         self._update_task(task.task_id, TaskStatus.FAILED, error)
 
+    def fail_by_id(self, task_id: str, error: str) -> None:
+        """Mark a task as failed by ID, without requiring a ClaimedTask."""
+        self._update_task(task_id, TaskStatus.FAILED, error)
+
     def cancel(self, task: ClaimedTask) -> None:
         """Transition a claimed or running task to CANCELLED."""
         self._update_task(task.task_id, TaskStatus.CANCELLED)
