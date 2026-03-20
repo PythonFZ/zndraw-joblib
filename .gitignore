@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Generated version file
+src/zndraw_joblib/_version.py
