@@ -10,7 +10,6 @@ These tests verify the planned resilience behaviors:
 """
 
 import asyncio
-import json
 import threading
 import time
 from typing import Any, ClassVar
