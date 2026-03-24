@@ -917,7 +917,7 @@ async def delete_worker(
     if worker.user_id != user.id and not user.is_superuser:
         raise Forbidden.exception(detail="Worker belongs to different user")
 
-    emissions = await cleanup_worker(session, worker)
+    emissions, _frame_rooms = await cleanup_worker(session, worker)
     await session.commit()
     await emit(tsio, emissions)
 
