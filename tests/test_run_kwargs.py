@@ -2,7 +2,6 @@
 
 from typing import Any, ClassVar
 
-import pytest
 
 from zndraw_joblib.client import (
     Category,
