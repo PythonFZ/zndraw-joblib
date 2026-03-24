@@ -155,8 +155,43 @@ class _MockClientApi:
         return {}
 
     def raise_for_status(self, response) -> None:
-        if response.status_code >= 400:
-            response.raise_for_status()
+        """Conform to ApiManager exception contract.
+
+        Raises
+        ------
+        KeyError
+            404 responses.
+        PermissionError
+            401/403 responses.
+        ValueError
+            409/422 responses.
+        """
+        if response.status_code < 400:
+            return
+        try:
+            detail = response.json().get("detail", response.text)
+        except Exception:
+            detail = response.text
+        if response.status_code == 404:
+            raise KeyError(str(detail))
+        if response.status_code in {401, 403}:
+            raise PermissionError(str(detail))
+        if response.status_code in {409, 422}:
+            raise ValueError(str(detail))
+        response.raise_for_status()
+
+
+class ToggleableTransport(httpx.BaseTransport):
+    """Wraps a real transport; can simulate network outages."""
+
+    def __init__(self, real: httpx.BaseTransport) -> None:
+        self._real = real
+        self.reachable = True
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        if not self.reachable:
+            raise httpx.ConnectError("Simulated network outage")
+        return self._real.handle_request(request)
 
 
 class _FsProvider(Provider):
