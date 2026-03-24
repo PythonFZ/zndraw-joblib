@@ -298,13 +298,29 @@ class JobManager:
         The worker is linked to the authenticated user. Use this to explicitly
         create a worker before registering jobs.
         """
-        response = self.api.http.post(
-            f"{self.api.base_url}/v1/joblib/workers",
-            headers=self.api.get_headers(),
-        )
-        self.api.raise_for_status(response)
-        self._worker_id = UUID(response.json()["id"])
-        return self._worker_id
+        for attempt in range(self._max_startup_retries):
+            try:
+                response = self.api.http.post(
+                    f"{self.api.base_url}/v1/joblib/workers",
+                    headers=self.api.get_headers(),
+                )
+                self.api.raise_for_status(response)
+                self._worker_id = UUID(response.json()["id"])
+                return self._worker_id
+            except (KeyError, PermissionError):
+                raise
+            except Exception as e:
+                if attempt == self._max_startup_retries - 1:
+                    raise
+                delay = min(2**attempt, 30) + random.uniform(0, 1)
+                logger.warning(
+                    "create_worker failed (attempt %d/%d): %s",
+                    attempt + 1,
+                    self._max_startup_retries,
+                    e,
+                )
+                time.sleep(delay)
+        raise RuntimeError("Unreachable")
 
     # -- Job registration -----------------------------------------------------
 
@@ -359,10 +375,8 @@ class JobManager:
         room_id = room if room is not None else "@global"
         category = cls.category.value
         name = cls.__name__
-
         schema = cls.model_json_schema()
 
-        # Build request using Pydantic model
         request = JobRegisterRequest(
             category=category,
             name=name,
@@ -370,20 +384,33 @@ class JobManager:
             worker_id=self._worker_id,
         )
 
-        resp = self.api.http.put(
-            f"{self.api.base_url}/v1/joblib/rooms/{room_id}/jobs",
-            headers=self.api.get_headers(),
-            json=request.model_dump(exclude_none=True, mode="json"),
-        )
-        self.api.raise_for_status(resp)
+        for attempt in range(self._max_startup_retries):
+            try:
+                resp = self.api.http.put(
+                    f"{self.api.base_url}/v1/joblib/rooms/{room_id}/jobs",
+                    headers=self.api.get_headers(),
+                    json=request.model_dump(exclude_none=True, mode="json"),
+                )
+                self.api.raise_for_status(resp)
+                break
+            except (KeyError, PermissionError):
+                raise
+            except Exception as e:
+                if attempt == self._max_startup_retries - 1:
+                    raise
+                delay = min(2**attempt, 30) + random.uniform(0, 1)
+                logger.warning(
+                    "register failed (attempt %d/%d): %s",
+                    attempt + 1,
+                    self._max_startup_retries,
+                    e,
+                )
+                time.sleep(delay)
 
         data = resp.json()
         full_name = f"{room_id}:{category}:{name}"
-
-        # Extract worker_id from response if auto-created
         if "worker_id" in data and data["worker_id"]:
             self._worker_id = UUID(data["worker_id"])
-
         if resp.status_code == 200:
             logger.info("Already registered: %s", full_name)
         self._registry[full_name] = (cls, run_kwargs or {})
@@ -392,7 +419,6 @@ class JobManager:
             self.tsio.emit(
                 JoinJobRoom(job_name=full_name, worker_id=str(self._worker_id))
             )
-
         self._ensure_background_threads()
 
     # -- Task operations ------------------------------------------------------
@@ -571,18 +597,33 @@ class JobManager:
             worker_id=self._worker_id,
         )
 
-        resp = self.api.http.put(
-            f"{self.api.base_url}/v1/joblib/rooms/{room}/providers",
-            headers=self.api.get_headers(),
-            json=request.model_dump(exclude_none=True, mode="json"),
-        )
-        self.api.raise_for_status(resp)
+        for attempt in range(self._max_startup_retries):
+            try:
+                resp = self.api.http.put(
+                    f"{self.api.base_url}/v1/joblib/rooms/{room}/providers",
+                    headers=self.api.get_headers(),
+                    json=request.model_dump(exclude_none=True, mode="json"),
+                )
+                self.api.raise_for_status(resp)
+                break
+            except (KeyError, PermissionError):
+                raise
+            except Exception as e:
+                if attempt == self._max_startup_retries - 1:
+                    raise
+                delay = min(2**attempt, 30) + random.uniform(0, 1)
+                logger.warning(
+                    "register_provider failed (attempt %d/%d): %s",
+                    attempt + 1,
+                    self._max_startup_retries,
+                    e,
+                )
+                time.sleep(delay)
 
         data = resp.json()
         provider_id = UUID(data["id"])
         full_name = f"{room}:{provider_cls.category}:{name}"
 
-        # Extract worker_id from response if auto-created
         if "worker_id" in data and data["worker_id"]:
             self._worker_id = UUID(data["worker_id"])
 
