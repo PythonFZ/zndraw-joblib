@@ -167,16 +167,18 @@ class JobManager:
             self.tsio.on(TaskAvailable, self._on_task_available)
 
             # Re-register SIO rooms after transport reconnection
+            tsio = self.tsio  # capture for closure (pyright narrowing)
+
             def _on_reconnect() -> None:
                 for job_name in list(self._registry):
-                    self.tsio.emit(
+                    tsio.emit(
                         JoinJobRoom(
                             job_name=job_name,
                             worker_id=str(self._worker_id),
                         )
                     )
                 for full_name in list(self._providers):
-                    self.tsio.emit(
+                    tsio.emit(
                         JoinProviderRoom(
                             provider_name=full_name,
                             worker_id=str(self._worker_id),
@@ -387,6 +389,7 @@ class JobManager:
             worker_id=self._worker_id,
         )
 
+        resp: httpx.Response | None = None
         for attempt in range(self._max_startup_retries):
             try:
                 resp = self.api.http.put(
@@ -410,6 +413,7 @@ class JobManager:
                 )
                 time.sleep(delay)
 
+        assert resp is not None  # guaranteed by retry loop or raise
         data = resp.json()
         full_name = f"{room_id}:{category}:{name}"
         if "worker_id" in data and data["worker_id"]:
@@ -600,6 +604,7 @@ class JobManager:
             worker_id=self._worker_id,
         )
 
+        resp: httpx.Response | None = None
         for attempt in range(self._max_startup_retries):
             try:
                 resp = self.api.http.put(
@@ -623,6 +628,7 @@ class JobManager:
                 )
                 time.sleep(delay)
 
+        assert resp is not None
         data = resp.json()
         provider_id = UUID(data["id"])
         full_name = f"{room}:{provider_cls.category}:{name}"
