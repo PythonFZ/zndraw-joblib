@@ -741,7 +741,8 @@ def test_provider_result_upload_404_triggers_exit(
     worker_id = manager.worker_id
     assert worker_id is not None
 
-    # Delete the worker from DB so the provider result POST will 404
+    # Delete the provider from DB so the provider result POST will 404
+    provider_reg = manager._providers["@global:filesystem:local"]
     async def _delete() -> None:
         from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
@@ -750,8 +751,8 @@ def test_provider_result_upload_404_triggers_exit(
         )
         async with factory() as session:
             await session.execute(
-                text("DELETE FROM worker WHERE id = :wid"),
-                {"wid": worker_id.hex},
+                text("DELETE FROM provider WHERE id = :pid"),
+                {"pid": provider_reg.id.hex},
             )
             await session.commit()
 
