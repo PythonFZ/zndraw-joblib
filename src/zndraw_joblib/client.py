@@ -214,51 +214,54 @@ class JobManager:
     def disconnect(self) -> None:
         """Gracefully disconnect the worker.
 
-        Idempotent — safe to call multiple times (e.g. signal handler + __exit__).
-
-        1. Signals background threads to stop and waits for them to finish
-        2. Emits LeaveProviderRoom / LeaveJobRoom for socket room cleanup
-        3. Calls DELETE /workers/{worker_id} (DB cleanup)
-        4. Clears local registry state
+        Thread-safe — guarded by ``_disconnect_lock`` to prevent concurrent
+        execution from signal handler + __exit__.
         """
-        if self._worker_id is None:
+        with self._disconnect_lock:
+            if self._worker_id is None:
+                self._stop.set()
+                return
+
             self._stop.set()
-            return
+            self._task_ready.set()
 
-        self._stop.set()
-        self._task_ready.set()  # wake claim loop if sleeping
+            for t in self._threads:
+                t.join(timeout=10.0)
+            self._threads.clear()
 
-        # Wait for background threads to finish their current work
-        for t in self._threads:
-            t.join(timeout=10.0)
-        self._threads.clear()
+            worker_id = self._worker_id
+            self._worker_id = None
 
-        worker_id = self._worker_id
-        self._worker_id = None
-
-        if self.tsio is not None:
-            for full_name in self._providers:
-                self.tsio.emit(
-                    LeaveProviderRoom(
-                        provider_name=full_name,
-                        worker_id=str(worker_id),
+            if self.tsio is not None:
+                for full_name in self._providers:
+                    self.tsio.emit(
+                        LeaveProviderRoom(
+                            provider_name=full_name,
+                            worker_id=str(worker_id),
+                        )
                     )
+
+            if self.tsio is not None:
+                for job_name in self._registry:
+                    self.tsio.emit(
+                        LeaveJobRoom(job_name=job_name, worker_id=str(worker_id))
+                    )
+
+            try:
+                resp = self.api.http.delete(
+                    f"{self.api.base_url}/v1/joblib/workers/{worker_id}",
+                    headers=self.api.get_headers(),
+                    timeout=5.0,
+                )
+                self.api.raise_for_status(resp)
+            except Exception:
+                logger.debug(
+                    "Failed to delete worker %s (server unreachable?)",
+                    worker_id,
                 )
 
-        if self.tsio is not None:
-            for job_name in self._registry:
-                self.tsio.emit(
-                    LeaveJobRoom(job_name=job_name, worker_id=str(worker_id))
-                )
-
-        resp = self.api.http.delete(
-            f"{self.api.base_url}/v1/joblib/workers/{worker_id}",
-            headers=self.api.get_headers(),
-        )
-        self.api.raise_for_status(resp)
-
-        self._providers.clear()
-        self._registry.clear()
+            self._providers.clear()
+            self._registry.clear()
 
     def wait(self) -> None:
         """Block until ``disconnect()`` is called or a signal is received.
