@@ -3,6 +3,7 @@
 
 import json
 import logging
+import random
 import signal
 import threading
 import time
@@ -73,7 +74,21 @@ class ApiManager(Protocol):
     @property
     def base_url(self) -> str: ...
 
-    def raise_for_status(self, response: httpx.Response) -> None: ...
+    def raise_for_status(self, response: httpx.Response) -> None:
+        """Raise on HTTP error responses.
+
+        Implementations MUST map status codes to these exception types:
+
+        Raises
+        ------
+        KeyError
+            404 responses (resource not found).
+        PermissionError
+            401/403 responses (authentication/authorization failure).
+        ValueError
+            409/422 responses (conflict/validation error).
+        """
+        ...
 
 
 class ClaimedTask(Generic[E]):
@@ -121,12 +136,16 @@ class JobManager:
         execute: Callable[[ClaimedTask], None] | None = None,
         heartbeat_interval: float = 30.0,
         polling_interval: float = 2.0,
+        max_unreachable_seconds: float = 120.0,
+        max_startup_retries: int = 5,
     ):
         self.api = api
         self.tsio = tsio
         self._execute = execute
         self._heartbeat_interval = heartbeat_interval
         self._polling_interval = polling_interval
+        self._max_unreachable_seconds = max_unreachable_seconds
+        self._max_startup_retries = max_startup_retries
         self._registry: dict[str, tuple[type[Extension], dict[str, Any]]] = {}
         self._worker_id: UUID | None = None
         self._providers: dict[str, _RegisteredProvider] = {}
@@ -137,10 +156,34 @@ class JobManager:
         self._threads_started: bool = False
         self._threads: list[threading.Thread] = []
 
-        # Register SIO handlers up front (cheap no-ops when dicts are empty)
+        # Resilience state
+        self._last_server_contact: float = time.monotonic()
+        self._contact_lock = threading.Lock()
+        self._disconnect_lock = threading.Lock()
+
+        # Register SIO handlers up front
         if self.tsio is not None:
             self.tsio.on(ProviderRequest, self._on_provider_request)
             self.tsio.on(TaskAvailable, self._on_task_available)
+
+            # Re-register SIO rooms after transport reconnection
+            def _on_reconnect() -> None:
+                for job_name in list(self._registry):
+                    self.tsio.emit(
+                        JoinJobRoom(
+                            job_name=job_name,
+                            worker_id=str(self._worker_id),
+                        )
+                    )
+                for full_name in list(self._providers):
+                    self.tsio.emit(
+                        JoinProviderRoom(
+                            provider_name=full_name,
+                            worker_id=str(self._worker_id),
+                        )
+                    )
+
+            self.tsio.on("connect", _on_reconnect)
 
     # -- Container protocol --------------------------------------------------
 
@@ -605,6 +648,18 @@ class JobManager:
             t = threading.Thread(target=self._claim_loop, daemon=True)
             t.start()
             self._threads.append(t)
+
+    def _update_last_contact(self) -> None:
+        """Record that the server responded successfully."""
+        with self._contact_lock:
+            self._last_server_contact = time.monotonic()
+
+    def _is_unreachable(self) -> bool:
+        """Return True if server has been unreachable too long."""
+        with self._contact_lock:
+            return (
+                time.monotonic() - self._last_server_contact
+            ) > self._max_unreachable_seconds
 
     def _heartbeat_loop(self) -> None:
         """Send periodic heartbeats until stopped."""
