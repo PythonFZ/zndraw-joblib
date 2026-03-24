@@ -707,8 +707,20 @@ class JobManager:
         while not self._stop.wait(self._heartbeat_interval):
             try:
                 self.heartbeat()
+                self._update_last_contact()
+            except (KeyError, PermissionError) as e:
+                logger.error("Registration lost (%s), shutting down", e)
+                self._stop.set()
+                return
             except Exception as e:
                 logger.warning("Heartbeat failed: %s", e)
+                if self._is_unreachable():
+                    logger.error(
+                        "Server unreachable for >%ss, shutting down",
+                        self._max_unreachable_seconds,
+                    )
+                    self._stop.set()
+                    return
 
     def _claim_loop(self) -> None:
         """Claim and execute tasks until stopped."""
@@ -716,17 +728,44 @@ class JobManager:
             self._task_ready.clear()
             try:
                 claimed = self.claim()
+                self._update_last_contact()
+            except (KeyError, PermissionError) as e:
+                logger.error("Registration lost (%s), shutting down", e)
+                self._stop.set()
+                return
             except Exception as e:
                 logger.warning("Claim failed: %s", e)
+                if self._is_unreachable():
+                    logger.error(
+                        "Server unreachable for >%ss, shutting down",
+                        self._max_unreachable_seconds,
+                    )
+                    self._stop.set()
+                    return
                 self._task_ready.wait(timeout=self._polling_interval)
                 continue
             if claimed is not None:
                 try:
                     self.start(claimed)
+                    self._update_last_contact()
+                except (KeyError, PermissionError):
+                    logger.error("Registration lost during task start, shutting down")
+                    self._stop.set()
+                    return
+                except Exception as e:
+                    logger.warning("Failed to start task %s: %s", claimed.task_id, e)
+                try:
                     self._execute(claimed)
                 except Exception as e:
                     try:
                         self.fail(claimed, str(e))
+                        self._update_last_contact()
+                    except (KeyError, PermissionError):
+                        logger.error(
+                            "Registration lost during task fail, shutting down"
+                        )
+                        self._stop.set()
+                        return
                     except Exception:
                         logger.exception(
                             "Failed to mark task %s as failed", claimed.task_id
@@ -736,6 +775,13 @@ class JobManager:
                 else:
                     try:
                         self.complete(claimed)
+                        self._update_last_contact()
+                    except (KeyError, PermissionError):
+                        logger.error(
+                            "Registration lost during task completion, shutting down"
+                        )
+                        self._stop.set()
+                        return
                     except Exception:
                         logger.exception(
                             "Failed to mark task %s completed", claimed.task_id
@@ -786,14 +832,22 @@ class JobManager:
             )
             return
 
-        if reg.cls.content_type == "application/json":
-            data = json.dumps(result).encode()
-        else:
-            data = result  # assumed bytes for binary content types
+        try:
+            if reg.cls.content_type == "application/json":
+                data = json.dumps(result).encode()
+            else:
+                data = result
 
-        resp = self.api.http.post(
-            f"{self.api.base_url}/v1/joblib/providers/{reg.id}/results",
-            content=data,
-            headers={**self.api.get_headers(), "X-Request-Hash": event.request_id},
-        )
-        self.api.raise_for_status(resp)
+            resp = self.api.http.post(
+                f"{self.api.base_url}/v1/joblib/providers/{reg.id}/results",
+                content=data,
+                headers={**self.api.get_headers(), "X-Request-Hash": event.request_id},
+            )
+            self.api.raise_for_status(resp)
+        except (KeyError, PermissionError) as e:
+            logger.error("Registration lost during provider result upload (%s)", e)
+            self._stop.set()
+        except Exception:
+            logger.warning(
+                "Failed to upload provider result for %s", event.provider_name
+            )
