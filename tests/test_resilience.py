@@ -142,7 +142,7 @@ def _delete_worker_from_db(async_session_factory: Any, worker_id: Any) -> None:
         async with async_session_factory() as session:
             await session.execute(
                 text("DELETE FROM worker WHERE id = :wid"),
-                {"wid": str(worker_id)},
+                {"wid": worker_id.hex},
             )
             await session.commit()
 
@@ -188,7 +188,7 @@ def test_heartbeat_404_triggers_exit(
         async with factory() as session:
             await session.execute(
                 text("DELETE FROM worker WHERE id = :wid"),
-                {"wid": str(worker_id)},
+                {"wid": worker_id.hex},
             )
             await session.commit()
 
@@ -237,7 +237,7 @@ def test_claim_404_triggers_exit(
         async with factory() as session:
             await session.execute(
                 text("DELETE FROM worker WHERE id = :wid"),
-                {"wid": str(worker_id)},
+                {"wid": worker_id.hex},
             )
             await session.commit()
 
@@ -301,7 +301,7 @@ def test_complete_404_triggers_exit(
         async with factory() as session:
             await session.execute(
                 text("DELETE FROM worker WHERE id = :wid"),
-                {"wid": str(worker_id)},
+                {"wid": worker_id.hex},
             )
             await session.commit()
 
@@ -751,7 +751,7 @@ def test_provider_result_upload_404_triggers_exit(
         async with factory() as session:
             await session.execute(
                 text("DELETE FROM worker WHERE id = :wid"),
-                {"wid": str(worker_id)},
+                {"wid": worker_id.hex},
             )
             await session.commit()
 
@@ -820,7 +820,7 @@ def test_stop_unblocks_wait(
         async with factory() as session:
             await session.execute(
                 text("DELETE FROM worker WHERE id = :wid"),
-                {"wid": str(worker_id)},
+                {"wid": worker_id.hex},
             )
             await session.commit()
 
@@ -885,7 +885,7 @@ def test_task_in_progress_then_exit(
         async with factory() as session:
             await session.execute(
                 text("DELETE FROM worker WHERE id = :wid"),
-                {"wid": str(worker_id)},
+                {"wid": worker_id.hex},
             )
             await session.commit()
 
