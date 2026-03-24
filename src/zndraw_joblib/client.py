@@ -85,11 +85,13 @@ class ClaimedTask(Generic[E]):
         job_name: str,
         room_id: str,
         extension: E,
+        run_kwargs: dict[str, Any] | None = None,
     ):
         self.task_id = task_id
         self.job_name = job_name
         self.room_id = room_id
         self.extension = extension
+        self.run_kwargs: dict[str, Any] = run_kwargs or {}
 
 
 @dataclass
@@ -125,7 +127,7 @@ class JobManager:
         self._execute = execute
         self._heartbeat_interval = heartbeat_interval
         self._polling_interval = polling_interval
-        self._registry: dict[str, type[Extension]] = {}
+        self._registry: dict[str, tuple[type[Extension], dict[str, Any]]] = {}
         self._worker_id: UUID | None = None
         self._providers: dict[str, _RegisteredProvider] = {}
 
@@ -143,7 +145,7 @@ class JobManager:
     # -- Container protocol --------------------------------------------------
 
     def __getitem__(self, key: str) -> type[Extension]:
-        return self._registry[key]
+        return self._registry[key][0]
 
     def __contains__(self, key: str) -> bool:
         return key in self._registry
@@ -153,6 +155,10 @@ class JobManager:
 
     def __iter__(self) -> Iterator[str]:
         return iter(self._registry)
+
+    def get_run_kwargs(self, key: str) -> dict[str, Any]:
+        """Return the run_kwargs stored for *key*."""
+        return self._registry[key][1]
 
     def __enter__(self) -> "JobManager":
         return self
@@ -264,9 +270,21 @@ class JobManager:
         extension_class: type[Extension] | None = None,
         *,
         room: str | None = None,
+        run_kwargs: dict[str, Any] | None = None,
     ):
         """
         Register an Extension class as a job.
+
+        Parameters
+        ----------
+        extension_class
+            Extension subclass to register.
+        room
+            Room scope. Defaults to ``"@global"``.
+        run_kwargs
+            Extra keyword arguments passed to ``extension.run()`` at
+            execution time. Useful for heavy, pre-loaded objects (e.g.
+            torch models) that should not be re-created per task.
 
         Usage:
             @manager.register
@@ -281,14 +299,19 @@ class JobManager:
         """
 
         def decorator(cls: type[Extension]) -> type[Extension]:
-            self._register_impl(cls, room)
+            self._register_impl(cls, room, run_kwargs)
             return cls
 
         if extension_class is None:
             return decorator
         return decorator(extension_class)
 
-    def _register_impl(self, cls: type[Extension], room: str | None) -> None:
+    def _register_impl(
+        self,
+        cls: type[Extension],
+        room: str | None,
+        run_kwargs: dict[str, Any] | None = None,
+    ) -> None:
         """Internal implementation of job registration."""
         room_id = room if room is not None else "@global"
         category = cls.category.value
@@ -320,7 +343,7 @@ class JobManager:
 
         if resp.status_code == 200:
             logger.info("Already registered: %s", full_name)
-        self._registry[full_name] = cls
+        self._registry[full_name] = (cls, run_kwargs or {})
 
         if self.tsio is not None:
             self.tsio.emit(
@@ -363,7 +386,7 @@ class JobManager:
         if job_name not in self._registry:
             raise KeyError(f"Job '{job_name}' not registered with this JobManager")
 
-        extension_cls = self._registry[job_name]
+        extension_cls, run_kwargs = self._registry[job_name]
         extension = extension_cls.model_validate(task.payload)
 
         return ClaimedTask(
@@ -371,6 +394,7 @@ class JobManager:
             job_name=job_name,
             room_id=task.room_id,
             extension=extension,
+            run_kwargs=run_kwargs,
         )
 
     def listen(
