@@ -29,7 +29,6 @@ from zndraw_joblib.client import (
 from zndraw_joblib.events import ProviderRequest
 from zndraw_joblib.provider import Provider
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -180,7 +179,7 @@ def test_heartbeat_404_triggers_exit(
 
     # Delete the worker directly from DB
     async def _delete() -> None:
-        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
         factory = async_sessionmaker(
             threadsafe_engine, class_=AsyncSession, expire_on_commit=False
@@ -202,9 +201,7 @@ def test_heartbeat_404_triggers_exit(
     )
 
 
-def test_claim_404_triggers_exit(
-    mock_client_api, threadsafe_client, threadsafe_engine
-):
+def test_claim_404_triggers_exit(mock_client_api, threadsafe_client, threadsafe_engine):
     """Claim loop exits when server returns 404 (worker deleted).
 
     Registers a worker with an execute callback so the claim loop runs,
@@ -229,7 +226,7 @@ def test_claim_404_triggers_exit(
 
     # Delete the worker directly from DB
     async def _delete() -> None:
-        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
         factory = async_sessionmaker(
             threadsafe_engine, class_=AsyncSession, expire_on_commit=False
@@ -293,7 +290,7 @@ def test_complete_404_triggers_exit(
 
     # Delete the worker while task is in progress
     async def _delete() -> None:
-        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
         factory = async_sessionmaker(
             threadsafe_engine, class_=AsyncSession, expire_on_commit=False
@@ -323,7 +320,7 @@ def test_heartbeat_permission_error_triggers_exit(
     Registers a worker as user A, then swaps the api to user B's client.
     The next heartbeat returns 403 because worker belongs to user A.
     """
-    from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     factory = async_sessionmaker(
         threadsafe_engine, class_=AsyncSession, expire_on_commit=False
@@ -391,9 +388,7 @@ def test_network_blip_does_not_trigger_exit(
 
     # Wait 5s after recovery — _stop should NOT be set
     time.sleep(5.0)
-    assert not manager._stop.is_set(), (
-        "_stop was set during a short network blip"
-    )
+    assert not manager._stop.is_set(), "_stop was set during a short network blip"
     manager.disconnect()
 
 
@@ -743,8 +738,9 @@ def test_provider_result_upload_404_triggers_exit(
 
     # Delete the provider from DB so the provider result POST will 404
     provider_reg = manager._providers["@global:filesystem:local"]
+
     async def _delete() -> None:
-        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
         factory = async_sessionmaker(
             threadsafe_engine, class_=AsyncSession, expire_on_commit=False
@@ -779,9 +775,7 @@ def test_provider_result_upload_404_triggers_exit(
 # ===================================================================
 
 
-def test_stop_unblocks_wait(
-    mock_client_api, threadsafe_client, threadsafe_engine
-):
+def test_stop_unblocks_wait(mock_client_api, threadsafe_client, threadsafe_engine):
     """wait() unblocks when heartbeat detects deleted worker.
 
     Registers a worker with heartbeat loop, deletes the worker from DB,
@@ -813,7 +807,7 @@ def test_stop_unblocks_wait(
 
     # Delete the worker from DB
     async def _delete() -> None:
-        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
         factory = async_sessionmaker(
             threadsafe_engine, class_=AsyncSession, expire_on_commit=False
@@ -830,9 +824,7 @@ def test_stop_unblocks_wait(
     loop.close()
 
     # wait() should unblock within 5s (heartbeat detects 404 → _stop set)
-    assert unblocked.wait(timeout=5.0), (
-        "wait() did not unblock after worker deletion"
-    )
+    assert unblocked.wait(timeout=5.0), "wait() did not unblock after worker deletion"
 
 
 def test_task_in_progress_then_exit(
@@ -878,7 +870,7 @@ def test_task_in_progress_then_exit(
 
     # Delete the worker from DB while task is executing
     async def _delete() -> None:
-        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
         factory = async_sessionmaker(
             threadsafe_engine, class_=AsyncSession, expire_on_commit=False
