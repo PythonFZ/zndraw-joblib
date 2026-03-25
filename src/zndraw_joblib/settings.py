@@ -1,9 +1,37 @@
 # src/zndraw_joblib/settings.py
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 
 class JobLibSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="ZNDRAW_JOBLIB_")
+    model_config = SettingsConfigDict(
+        env_prefix="ZNDRAW_JOBLIB_",
+        pyproject_toml_table_header=("tool", "zndraw", "joblib"),
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
+        file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Add pyproject.toml as a configuration source.
+
+        Priority (highest to lowest): init, env vars, pyproject.toml.
+        """
+        from pydantic_settings import PyprojectTomlConfigSettingsSource  # noqa: PLC0415
+
+        return (
+            init_settings,
+            env_settings,
+            PyprojectTomlConfigSettingsSource(settings_cls),
+        )
 
     allowed_categories: list[str] = ["modifiers", "selections", "analysis"]
     worker_timeout_seconds: int = 60
