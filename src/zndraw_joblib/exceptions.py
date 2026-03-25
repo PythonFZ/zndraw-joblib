@@ -123,12 +123,22 @@ class WorkerNotFound(ProblemType):
     title: ClassVar[str] = "Not Found"
     status: ClassVar[int] = 404
 
+    @classmethod
+    def raise_for_client(cls, problem: "ProblemDetail") -> NoReturn:
+        """Raise KeyError for client-side 404 handling."""
+        raise KeyError(problem.detail or problem.title)
+
 
 class TaskNotFound(ProblemType):
     """The requested task does not exist."""
 
     title: ClassVar[str] = "Not Found"
     status: ClassVar[int] = 404
+
+    @classmethod
+    def raise_for_client(cls, problem: "ProblemDetail") -> NoReturn:
+        """Raise KeyError for client-side 404 handling."""
+        raise KeyError(problem.detail or problem.title)
 
 
 class InvalidTaskTransition(ProblemType):

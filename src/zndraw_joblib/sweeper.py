@@ -5,7 +5,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, Callable
+from typing import Any, AsyncGenerator, Callable
 
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -79,11 +79,19 @@ async def _soft_delete_orphan_job(
     return emissions
 
 
-async def cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission]:
+async def cleanup_worker(
+    session: AsyncSession, worker: Worker
+) -> tuple[set[Emission], set[str]]:
     """Clean up a worker by failing tasks, removing links, and soft-deleting orphan jobs.
 
     This is the shared cleanup logic used by both delete_worker endpoint and sweeper.
     Note: Does NOT commit the transaction - caller must commit.
+
+    Returns
+    -------
+    tuple[set[Emission], set[str]]
+        A tuple of (emissions to broadcast, room IDs that had frame providers removed).
+        The frame provider room IDs allow callers to clean up external state (e.g. Redis keys).
     """
     emissions: set[Emission] = set()
     now = datetime.now(timezone.utc)
@@ -133,7 +141,10 @@ async def cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission]
     )
     providers = result.scalars().all()
     provider_rooms: set[str] = set()
+    frame_provider_rooms: set[str] = set()
     for provider in providers:
+        if provider.category == "frames":
+            frame_provider_rooms.add(provider.room_id)
         provider_rooms.add(provider.room_id)
         await session.delete(provider)
     for room_id in provider_rooms:
@@ -151,23 +162,30 @@ async def cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission]
     for job_id in job_ids:
         emissions |= await _soft_delete_orphan_job(session, job_id)
 
-    return emissions
+    return emissions, frame_provider_rooms
 
 
 async def cleanup_stale_workers(
     session: AsyncSession, timeout: timedelta
-) -> tuple[int, set[Emission]]:
+) -> tuple[int, set[Emission], set[str]]:
     """Find and clean up workers with stale heartbeats.
 
-    Args:
-        session: Async database session
-        timeout: How long since last heartbeat before a worker is considered stale
+    Parameters
+    ----------
+    session : AsyncSession
+        Async database session.
+    timeout : timedelta
+        How long since last heartbeat before a worker is considered stale.
 
-    Returns:
-        Tuple of (count of workers cleaned up, set of emissions).
+    Returns
+    -------
+    tuple[int, set[Emission], set[str]]
+        Tuple of (count of workers cleaned up, emissions, room IDs that had
+        frame providers removed).
     """
     cutoff = datetime.now(timezone.utc) - timeout
     all_emissions: set[Emission] = set()
+    all_frame_rooms: set[str] = set()
 
     # Find all stale workers
     result = await session.execute(select(Worker).where(Worker.last_heartbeat < cutoff))
@@ -176,14 +194,15 @@ async def cleanup_stale_workers(
     count = 0
     for worker in stale_workers:
         logger.info("Cleaning up stale worker: %s", worker.id)
-        emissions = await cleanup_worker(session, worker)
+        emissions, frame_rooms = await cleanup_worker(session, worker)
         all_emissions |= emissions
+        all_frame_rooms |= frame_rooms
         count += 1
 
     if count > 0:
         await session.commit()
 
-    return count, all_emissions
+    return count, all_emissions, all_frame_rooms
 
 
 async def cleanup_stuck_internal_tasks(
@@ -236,8 +255,22 @@ async def run_sweeper(
     get_session: Callable[[], AsyncGenerator[AsyncSession, None]],
     settings: JobLibSettings,
     tsio: AsyncServerWrapper | None = None,
+    on_frame_rooms: Callable[[set[str]], Any] | None = None,
 ) -> None:
-    """Background task that runs cleanup periodically."""
+    """Background task that runs cleanup periodically.
+
+    Parameters
+    ----------
+    get_session
+        Async generator yielding database sessions.
+    settings
+        JobLib configuration.
+    tsio
+        Optional Socket.IO server for broadcasting events.
+    on_frame_rooms
+        Optional async callback invoked with room IDs that had frame providers
+        removed. Host apps use this to clean up external state (e.g. Redis keys).
+    """
     timeout = timedelta(seconds=settings.worker_timeout_seconds)
     internal_timeout = timedelta(seconds=settings.internal_task_timeout_seconds)
     interval = settings.sweeper_interval_seconds
@@ -253,10 +286,14 @@ async def run_sweeper(
         await asyncio.sleep(interval)
         try:
             async for session in get_session():
-                count, emissions = await cleanup_stale_workers(session, timeout)
+                count, emissions, frame_rooms = await cleanup_stale_workers(
+                    session, timeout
+                )
                 if count > 0:
                     logger.info("Cleaned up %s stale worker(s)", count)
                 await emit(tsio, emissions)
+                if frame_rooms and on_frame_rooms is not None:
+                    await on_frame_rooms(frame_rooms)
 
             async for session in get_session():
                 count, emissions = await cleanup_stuck_internal_tasks(

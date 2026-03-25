@@ -3,6 +3,7 @@
 
 import json
 import logging
+import random
 import signal
 import threading
 import time
@@ -73,7 +74,21 @@ class ApiManager(Protocol):
     @property
     def base_url(self) -> str: ...
 
-    def raise_for_status(self, response: httpx.Response) -> None: ...
+    def raise_for_status(self, response: httpx.Response) -> None:
+        """Raise on HTTP error responses.
+
+        Implementations MUST map status codes to these exception types:
+
+        Raises
+        ------
+        KeyError
+            404 responses (resource not found).
+        PermissionError
+            401/403 responses (authentication/authorization failure).
+        ValueError
+            409/422 responses (conflict/validation error).
+        """
+        ...
 
 
 class ClaimedTask(Generic[E]):
@@ -121,12 +136,16 @@ class JobManager:
         execute: Callable[[ClaimedTask], None] | None = None,
         heartbeat_interval: float = 30.0,
         polling_interval: float = 2.0,
+        max_unreachable_seconds: float = 120.0,
+        max_startup_retries: int = 5,
     ):
         self.api = api
         self.tsio = tsio
         self._execute = execute
         self._heartbeat_interval = heartbeat_interval
         self._polling_interval = polling_interval
+        self._max_unreachable_seconds = max_unreachable_seconds
+        self._max_startup_retries = max_startup_retries
         self._registry: dict[str, tuple[type[Extension], dict[str, Any]]] = {}
         self._worker_id: UUID | None = None
         self._providers: dict[str, _RegisteredProvider] = {}
@@ -137,10 +156,36 @@ class JobManager:
         self._threads_started: bool = False
         self._threads: list[threading.Thread] = []
 
-        # Register SIO handlers up front (cheap no-ops when dicts are empty)
+        # Resilience state
+        self._last_server_contact: float = time.monotonic()
+        self._contact_lock = threading.Lock()
+        self._disconnect_lock = threading.Lock()
+
+        # Register SIO handlers up front
         if self.tsio is not None:
             self.tsio.on(ProviderRequest, self._on_provider_request)
             self.tsio.on(TaskAvailable, self._on_task_available)
+
+            # Re-register SIO rooms after transport reconnection
+            tsio = self.tsio  # capture for closure (pyright narrowing)
+
+            def _on_reconnect() -> None:
+                for job_name in list(self._registry):
+                    tsio.emit(
+                        JoinJobRoom(
+                            job_name=job_name,
+                            worker_id=str(self._worker_id),
+                        )
+                    )
+                for full_name in list(self._providers):
+                    tsio.emit(
+                        JoinProviderRoom(
+                            provider_name=full_name,
+                            worker_id=str(self._worker_id),
+                        )
+                    )
+
+            self.tsio.on("connect", _on_reconnect)
 
     # -- Container protocol --------------------------------------------------
 
@@ -171,51 +216,54 @@ class JobManager:
     def disconnect(self) -> None:
         """Gracefully disconnect the worker.
 
-        Idempotent — safe to call multiple times (e.g. signal handler + __exit__).
-
-        1. Signals background threads to stop and waits for them to finish
-        2. Emits LeaveProviderRoom / LeaveJobRoom for socket room cleanup
-        3. Calls DELETE /workers/{worker_id} (DB cleanup)
-        4. Clears local registry state
+        Thread-safe — guarded by ``_disconnect_lock`` to prevent concurrent
+        execution from signal handler + __exit__.
         """
-        if self._worker_id is None:
+        with self._disconnect_lock:
+            if self._worker_id is None:
+                self._stop.set()
+                return
+
             self._stop.set()
-            return
+            self._task_ready.set()
 
-        self._stop.set()
-        self._task_ready.set()  # wake claim loop if sleeping
+            for t in self._threads:
+                t.join(timeout=10.0)
+            self._threads.clear()
 
-        # Wait for background threads to finish their current work
-        for t in self._threads:
-            t.join(timeout=10.0)
-        self._threads.clear()
+            worker_id = self._worker_id
+            self._worker_id = None
 
-        worker_id = self._worker_id
-        self._worker_id = None
-
-        if self.tsio is not None:
-            for full_name in self._providers:
-                self.tsio.emit(
-                    LeaveProviderRoom(
-                        provider_name=full_name,
-                        worker_id=str(worker_id),
+            if self.tsio is not None:
+                for full_name in self._providers:
+                    self.tsio.emit(
+                        LeaveProviderRoom(
+                            provider_name=full_name,
+                            worker_id=str(worker_id),
+                        )
                     )
+
+            if self.tsio is not None:
+                for job_name in self._registry:
+                    self.tsio.emit(
+                        LeaveJobRoom(job_name=job_name, worker_id=str(worker_id))
+                    )
+
+            try:
+                resp = self.api.http.delete(
+                    f"{self.api.base_url}/v1/joblib/workers/{worker_id}",
+                    headers=self.api.get_headers(),
+                    timeout=5.0,
+                )
+                self.api.raise_for_status(resp)
+            except Exception:
+                logger.debug(
+                    "Failed to delete worker %s (server unreachable?)",
+                    worker_id,
                 )
 
-        if self.tsio is not None:
-            for job_name in self._registry:
-                self.tsio.emit(
-                    LeaveJobRoom(job_name=job_name, worker_id=str(worker_id))
-                )
-
-        resp = self.api.http.delete(
-            f"{self.api.base_url}/v1/joblib/workers/{worker_id}",
-            headers=self.api.get_headers(),
-        )
-        self.api.raise_for_status(resp)
-
-        self._providers.clear()
-        self._registry.clear()
+            self._providers.clear()
+            self._registry.clear()
 
     def wait(self) -> None:
         """Block until ``disconnect()`` is called or a signal is received.
@@ -249,18 +297,56 @@ class JobManager:
         """The worker ID for this manager (set after create_worker or first job registration)."""
         return self._worker_id
 
+    def _retry_startup(
+        self,
+        label: str,
+        fn: Callable[[], httpx.Response],
+    ) -> httpx.Response:
+        """Execute *fn* with retry/backoff, re-raising fatal errors immediately.
+
+        Parameters
+        ----------
+        label
+            Human-readable label for log messages (e.g. ``"create_worker"``).
+        fn
+            Callable that performs the HTTP request and returns the response.
+            ``raise_for_status`` is called on the response internally.
+        """
+        for attempt in range(self._max_startup_retries):
+            try:
+                resp = fn()
+                self.api.raise_for_status(resp)
+                return resp
+            except (KeyError, PermissionError):
+                raise
+            except Exception as e:
+                if attempt == self._max_startup_retries - 1:
+                    raise
+                delay = min(2**attempt, 30) + random.uniform(0, 1)
+                logger.warning(
+                    "%s failed (attempt %d/%d): %s",
+                    label,
+                    attempt + 1,
+                    self._max_startup_retries,
+                    e,
+                )
+                time.sleep(delay)
+        raise RuntimeError("Unreachable: retry loop completed without response")
+
     def create_worker(self) -> UUID:
         """Create a new worker and return its ID.
 
         The worker is linked to the authenticated user. Use this to explicitly
         create a worker before registering jobs.
         """
-        response = self.api.http.post(
-            f"{self.api.base_url}/v1/joblib/workers",
-            headers=self.api.get_headers(),
+        resp = self._retry_startup(
+            "create_worker",
+            lambda: self.api.http.post(
+                f"{self.api.base_url}/v1/joblib/workers",
+                headers=self.api.get_headers(),
+            ),
         )
-        self.api.raise_for_status(response)
-        self._worker_id = UUID(response.json()["id"])
+        self._worker_id = UUID(resp.json()["id"])
         return self._worker_id
 
     # -- Job registration -----------------------------------------------------
@@ -316,10 +402,8 @@ class JobManager:
         room_id = room if room is not None else "@global"
         category = cls.category.value
         name = cls.__name__
-
         schema = cls.model_json_schema()
 
-        # Build request using Pydantic model
         request = JobRegisterRequest(
             category=category,
             name=name,
@@ -327,20 +411,18 @@ class JobManager:
             worker_id=self._worker_id,
         )
 
-        resp = self.api.http.put(
-            f"{self.api.base_url}/v1/joblib/rooms/{room_id}/jobs",
-            headers=self.api.get_headers(),
-            json=request.model_dump(exclude_none=True, mode="json"),
+        resp = self._retry_startup(
+            "register",
+            lambda: self.api.http.put(
+                f"{self.api.base_url}/v1/joblib/rooms/{room_id}/jobs",
+                headers=self.api.get_headers(),
+                json=request.model_dump(exclude_none=True, mode="json"),
+            ),
         )
-        self.api.raise_for_status(resp)
-
         data = resp.json()
         full_name = f"{room_id}:{category}:{name}"
-
-        # Extract worker_id from response if auto-created
         if "worker_id" in data and data["worker_id"]:
             self._worker_id = UUID(data["worker_id"])
-
         if resp.status_code == 200:
             logger.info("Already registered: %s", full_name)
         self._registry[full_name] = (cls, run_kwargs or {})
@@ -349,7 +431,6 @@ class JobManager:
             self.tsio.emit(
                 JoinJobRoom(job_name=full_name, worker_id=str(self._worker_id))
             )
-
         self._ensure_background_threads()
 
     # -- Task operations ------------------------------------------------------
@@ -528,18 +609,18 @@ class JobManager:
             worker_id=self._worker_id,
         )
 
-        resp = self.api.http.put(
-            f"{self.api.base_url}/v1/joblib/rooms/{room}/providers",
-            headers=self.api.get_headers(),
-            json=request.model_dump(exclude_none=True, mode="json"),
+        resp = self._retry_startup(
+            "register_provider",
+            lambda: self.api.http.put(
+                f"{self.api.base_url}/v1/joblib/rooms/{room}/providers",
+                headers=self.api.get_headers(),
+                json=request.model_dump(exclude_none=True, mode="json"),
+            ),
         )
-        self.api.raise_for_status(resp)
-
         data = resp.json()
         provider_id = UUID(data["id"])
         full_name = f"{room}:{provider_cls.category}:{name}"
 
-        # Extract worker_id from response if auto-created
         if "worker_id" in data and data["worker_id"]:
             self._worker_id = UUID(data["worker_id"])
 
@@ -606,13 +687,37 @@ class JobManager:
             t.start()
             self._threads.append(t)
 
+    def _update_last_contact(self) -> None:
+        """Record that the server responded successfully."""
+        with self._contact_lock:
+            self._last_server_contact = time.monotonic()
+
+    def _is_unreachable(self) -> bool:
+        """Return True if server has been unreachable too long."""
+        with self._contact_lock:
+            return (
+                time.monotonic() - self._last_server_contact
+            ) > self._max_unreachable_seconds
+
     def _heartbeat_loop(self) -> None:
         """Send periodic heartbeats until stopped."""
         while not self._stop.wait(self._heartbeat_interval):
             try:
                 self.heartbeat()
+                self._update_last_contact()
+            except (KeyError, PermissionError) as e:
+                logger.error("Registration lost (%s), shutting down", e)
+                self._stop.set()
+                return
             except Exception as e:
                 logger.warning("Heartbeat failed: %s", e)
+                if self._is_unreachable():
+                    logger.error(
+                        "Server unreachable for >%ss, shutting down",
+                        self._max_unreachable_seconds,
+                    )
+                    self._stop.set()
+                    return
 
     def _claim_loop(self) -> None:
         """Claim and execute tasks until stopped."""
@@ -620,17 +725,45 @@ class JobManager:
             self._task_ready.clear()
             try:
                 claimed = self.claim()
+                self._update_last_contact()
+            except (KeyError, PermissionError) as e:
+                logger.error("Registration lost (%s), shutting down", e)
+                self._stop.set()
+                return
             except Exception as e:
                 logger.warning("Claim failed: %s", e)
+                if self._is_unreachable():
+                    logger.error(
+                        "Server unreachable for >%ss, shutting down",
+                        self._max_unreachable_seconds,
+                    )
+                    self._stop.set()
+                    return
                 self._task_ready.wait(timeout=self._polling_interval)
                 continue
             if claimed is not None:
                 try:
                     self.start(claimed)
+                    self._update_last_contact()
+                except (KeyError, PermissionError):
+                    logger.error("Registration lost during task start, shutting down")
+                    self._stop.set()
+                    return
+                except Exception as e:
+                    logger.warning("Failed to start task %s: %s", claimed.task_id, e)
+                    continue
+                try:
                     self._execute(claimed)
                 except Exception as e:
                     try:
                         self.fail(claimed, str(e))
+                        self._update_last_contact()
+                    except (KeyError, PermissionError):
+                        logger.error(
+                            "Registration lost during task fail, shutting down"
+                        )
+                        self._stop.set()
+                        return
                     except Exception:
                         logger.exception(
                             "Failed to mark task %s as failed", claimed.task_id
@@ -640,6 +773,13 @@ class JobManager:
                 else:
                     try:
                         self.complete(claimed)
+                        self._update_last_contact()
+                    except (KeyError, PermissionError):
+                        logger.error(
+                            "Registration lost during task completion, shutting down"
+                        )
+                        self._stop.set()
+                        return
                     except Exception:
                         logger.exception(
                             "Failed to mark task %s completed", claimed.task_id
@@ -690,14 +830,22 @@ class JobManager:
             )
             return
 
-        if reg.cls.content_type == "application/json":
-            data = json.dumps(result).encode()
-        else:
-            data = result  # assumed bytes for binary content types
+        try:
+            if reg.cls.content_type == "application/json":
+                data = json.dumps(result).encode()
+            else:
+                data = result
 
-        resp = self.api.http.post(
-            f"{self.api.base_url}/v1/joblib/providers/{reg.id}/results",
-            content=data,
-            headers={**self.api.get_headers(), "X-Request-Hash": event.request_id},
-        )
-        self.api.raise_for_status(resp)
+            resp = self.api.http.post(
+                f"{self.api.base_url}/v1/joblib/providers/{reg.id}/results",
+                content=data,
+                headers={**self.api.get_headers(), "X-Request-Hash": event.request_id},
+            )
+            self.api.raise_for_status(resp)
+        except (KeyError, PermissionError) as e:
+            logger.error("Registration lost during provider result upload (%s)", e)
+            self._stop.set()
+        except Exception:
+            logger.warning(
+                "Failed to upload provider result for %s", event.provider_name
+            )

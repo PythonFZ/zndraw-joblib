@@ -35,7 +35,7 @@ async def test_cleanup_stale_workers_finds_stale(async_session_factory, test_use
 
     # Run cleanup with 60 second timeout
     async with async_session_factory() as session:
-        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 1
 
     # Verify worker was deleted
@@ -64,7 +64,7 @@ async def test_cleanup_stale_workers_ignores_alive(async_session_factory, test_u
 
     # Run cleanup with 60 second timeout
     async with async_session_factory() as session:
-        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 0
 
     # Verify worker still exists
@@ -126,7 +126,7 @@ async def test_cleanup_fails_running_tasks(async_session_factory, test_user_id):
 
     # Run cleanup
     async with async_session_factory() as session:
-        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 1
 
     # Verify CLAIMED and RUNNING tasks are failed, PENDING is unchanged
@@ -185,7 +185,7 @@ async def test_cleanup_soft_deletes_orphan_jobs(async_session_factory, test_user
 
     # Run cleanup
     async with async_session_factory() as session:
-        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 1
 
     # Verify job is soft-deleted
@@ -233,7 +233,7 @@ async def test_cleanup_keeps_job_with_pending_tasks(
 
     # Run cleanup
     async with async_session_factory() as session:
-        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 1
 
     # Verify job is NOT soft-deleted because it has a pending task
@@ -266,7 +266,7 @@ async def test_cleanup_multiple_stale_workers(async_session_factory, test_user_i
 
     # Run cleanup
     async with async_session_factory() as session:
-        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 3
 
     # Verify only alive worker remains
@@ -346,7 +346,7 @@ async def test_cleanup_job_keeps_other_workers(async_session_factory, test_user_
 
     # Run cleanup
     async with async_session_factory() as session:
-        count, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, _, _ = await cleanup_stale_workers(session, timedelta(seconds=60))
         assert count == 1
 
     # Verify job is NOT soft-deleted because alive-worker is still linked
@@ -476,7 +476,7 @@ async def test_cleanup_worker_returns_task_status_emissions(
     async with async_session_factory() as session:
         result = await session.execute(select(Worker).where(Worker.id == worker_id))
         worker = result.scalar_one()
-        emissions = await cleanup_worker(session, worker)
+        emissions, _frame_rooms = await cleanup_worker(session, worker)
         await session.commit()
 
     # Should have TaskStatusEvent for the failed task + JobsInvalidate for orphan job
@@ -504,9 +504,12 @@ async def test_cleanup_stale_workers_returns_emissions(
         await session.commit()
 
     async with async_session_factory() as session:
-        count, emissions = await cleanup_stale_workers(session, timedelta(seconds=60))
+        count, emissions, frame_rooms = await cleanup_stale_workers(
+            session, timedelta(seconds=60)
+        )
         assert count == 1
         assert isinstance(emissions, set)
+        assert isinstance(frame_rooms, set)
 
 
 @pytest.mark.asyncio
