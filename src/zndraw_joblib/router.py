@@ -22,6 +22,7 @@ from zndraw_auth.db import SessionDep, get_session_maker
 from zndraw_socketio import AsyncServerWrapper
 
 from zndraw_joblib.dependencies import (
+    FrameRoomCleanupDep,
     JobLibSettingsDep,
     ResultBackendDep,
     WritableRoomDep,
@@ -904,6 +905,7 @@ async def delete_worker(
     session: SessionDep,
     user: CurrentUserDep,
     tsio: TsioDep,
+    frame_cleanup: FrameRoomCleanupDep,
 ):
     """Delete worker, fail their tasks, remove job links, and clean up orphan jobs.
 
@@ -917,9 +919,11 @@ async def delete_worker(
     if worker.user_id != user.id and not user.is_superuser:
         raise Forbidden.exception(detail="Worker belongs to different user")
 
-    emissions, _frame_rooms = await cleanup_worker(session, worker)
+    emissions, frame_rooms = await cleanup_worker(session, worker)
     await session.commit()
     await emit(tsio, emissions)
+    if frame_rooms:
+        await frame_cleanup(frame_rooms)
 
 
 # ---------------------------------------------------------------------------

@@ -297,21 +297,26 @@ class JobManager:
         """The worker ID for this manager (set after create_worker or first job registration)."""
         return self._worker_id
 
-    def create_worker(self) -> UUID:
-        """Create a new worker and return its ID.
+    def _retry_startup(
+        self,
+        label: str,
+        fn: Callable[[], httpx.Response],
+    ) -> httpx.Response:
+        """Execute *fn* with retry/backoff, re-raising fatal errors immediately.
 
-        The worker is linked to the authenticated user. Use this to explicitly
-        create a worker before registering jobs.
+        Parameters
+        ----------
+        label
+            Human-readable label for log messages (e.g. ``"create_worker"``).
+        fn
+            Callable that performs the HTTP request and returns the response.
+            ``raise_for_status`` is called on the response internally.
         """
         for attempt in range(self._max_startup_retries):
             try:
-                response = self.api.http.post(
-                    f"{self.api.base_url}/v1/joblib/workers",
-                    headers=self.api.get_headers(),
-                )
-                self.api.raise_for_status(response)
-                self._worker_id = UUID(response.json()["id"])
-                return self._worker_id
+                resp = fn()
+                self.api.raise_for_status(resp)
+                return resp
             except (KeyError, PermissionError):
                 raise
             except Exception as e:
@@ -319,13 +324,30 @@ class JobManager:
                     raise
                 delay = min(2**attempt, 30) + random.uniform(0, 1)
                 logger.warning(
-                    "create_worker failed (attempt %d/%d): %s",
+                    "%s failed (attempt %d/%d): %s",
+                    label,
                     attempt + 1,
                     self._max_startup_retries,
                     e,
                 )
                 time.sleep(delay)
-        raise RuntimeError("Unreachable")
+        raise RuntimeError("Unreachable: retry loop completed without response")
+
+    def create_worker(self) -> UUID:
+        """Create a new worker and return its ID.
+
+        The worker is linked to the authenticated user. Use this to explicitly
+        create a worker before registering jobs.
+        """
+        resp = self._retry_startup(
+            "create_worker",
+            lambda: self.api.http.post(
+                f"{self.api.base_url}/v1/joblib/workers",
+                headers=self.api.get_headers(),
+            ),
+        )
+        self._worker_id = UUID(resp.json()["id"])
+        return self._worker_id
 
     # -- Job registration -----------------------------------------------------
 
@@ -389,31 +411,14 @@ class JobManager:
             worker_id=self._worker_id,
         )
 
-        resp: httpx.Response | None = None
-        for attempt in range(self._max_startup_retries):
-            try:
-                resp = self.api.http.put(
-                    f"{self.api.base_url}/v1/joblib/rooms/{room_id}/jobs",
-                    headers=self.api.get_headers(),
-                    json=request.model_dump(exclude_none=True, mode="json"),
-                )
-                self.api.raise_for_status(resp)
-                break
-            except (KeyError, PermissionError):
-                raise
-            except Exception as e:
-                if attempt == self._max_startup_retries - 1:
-                    raise
-                delay = min(2**attempt, 30) + random.uniform(0, 1)
-                logger.warning(
-                    "register failed (attempt %d/%d): %s",
-                    attempt + 1,
-                    self._max_startup_retries,
-                    e,
-                )
-                time.sleep(delay)
-
-        assert resp is not None  # guaranteed by retry loop or raise
+        resp = self._retry_startup(
+            "register",
+            lambda: self.api.http.put(
+                f"{self.api.base_url}/v1/joblib/rooms/{room_id}/jobs",
+                headers=self.api.get_headers(),
+                json=request.model_dump(exclude_none=True, mode="json"),
+            ),
+        )
         data = resp.json()
         full_name = f"{room_id}:{category}:{name}"
         if "worker_id" in data and data["worker_id"]:
@@ -604,31 +609,14 @@ class JobManager:
             worker_id=self._worker_id,
         )
 
-        resp: httpx.Response | None = None
-        for attempt in range(self._max_startup_retries):
-            try:
-                resp = self.api.http.put(
-                    f"{self.api.base_url}/v1/joblib/rooms/{room}/providers",
-                    headers=self.api.get_headers(),
-                    json=request.model_dump(exclude_none=True, mode="json"),
-                )
-                self.api.raise_for_status(resp)
-                break
-            except (KeyError, PermissionError):
-                raise
-            except Exception as e:
-                if attempt == self._max_startup_retries - 1:
-                    raise
-                delay = min(2**attempt, 30) + random.uniform(0, 1)
-                logger.warning(
-                    "register_provider failed (attempt %d/%d): %s",
-                    attempt + 1,
-                    self._max_startup_retries,
-                    e,
-                )
-                time.sleep(delay)
-
-        assert resp is not None
+        resp = self._retry_startup(
+            "register_provider",
+            lambda: self.api.http.put(
+                f"{self.api.base_url}/v1/joblib/rooms/{room}/providers",
+                headers=self.api.get_headers(),
+                json=request.model_dump(exclude_none=True, mode="json"),
+            ),
+        )
         data = resp.json()
         provider_id = UUID(data["id"])
         full_name = f"{room}:{provider_cls.category}:{name}"
@@ -763,6 +751,7 @@ class JobManager:
                     return
                 except Exception as e:
                     logger.warning("Failed to start task %s: %s", claimed.task_id, e)
+                    continue
                 try:
                     self._execute(claimed)
                 except Exception as e:

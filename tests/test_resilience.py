@@ -133,20 +133,6 @@ class _ToggleableApi:
         response.raise_for_status()
 
 
-def _delete_worker_from_db(async_session_factory: Any, worker_id: Any) -> None:
-    """Delete a worker row directly from the DB (bypass REST API)."""
-
-    async def _do() -> None:
-        async with async_session_factory() as session:
-            await session.execute(
-                text("DELETE FROM worker WHERE id = :wid"),
-                {"wid": worker_id.hex},
-            )
-            await session.commit()
-
-    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(_do())
-
-
 # ===================================================================
 # Fatal error tests
 # ===================================================================
@@ -319,12 +305,6 @@ def test_heartbeat_permission_error_triggers_exit(
     Registers a worker as user A, then swaps the api to user B's client.
     The next heartbeat returns 403 because worker belongs to user A.
     """
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-    factory = async_sessionmaker(
-        threadsafe_engine, class_=AsyncSession, expire_on_commit=False
-    )
-
     # Build two apps using the threadsafe engine
     user_a_client = client_factory("user_a")
     user_b_client = client_factory("user_b")
@@ -889,3 +869,61 @@ def test_task_in_progress_then_exit(
     assert manager._stop.wait(timeout=10.0), (
         "_stop was not set after worker deletion during task execution"
     )
+
+
+# ===================================================================
+# start() fall-through regression
+# ===================================================================
+
+
+def test_start_failure_skips_execute(
+    mock_client_api, threadsafe_client, threadsafe_engine
+):
+    """Transient start() failure must NOT execute the task.
+
+    If start() (CLAIMED -> RUNNING transition) fails with a transient error
+    (e.g. ConnectError), the claim loop must skip execution entirely. The task
+    stays CLAIMED and can be reclaimed later.
+
+    Regression test for: start() fall-through bug where _execute() ran despite
+    start() raising a transient exception.
+    """
+    executed = threading.Event()
+
+    def track_execute(task: ClaimedTask) -> None:
+        executed.set()
+
+    api = mock_client_api(threadsafe_client)
+    manager = JobManager(
+        api,
+        execute=track_execute,
+        heartbeat_interval=30.0,
+        polling_interval=0.1,
+        max_unreachable_seconds=120.0,
+    )
+
+    @manager.register
+    class StartFailJob(_Ext):
+        category: ClassVar[Category] = Category.MODIFIER
+
+    # Monkeypatch start() to always raise a transient error
+    def failing_start(task: ClaimedTask) -> None:
+        raise httpx.ConnectError("Simulated start() failure")
+
+    manager.start = failing_start  # type: ignore[assignment]
+
+    # Submit a task
+    resp = threadsafe_client.post(
+        "/v1/joblib/rooms/room_1/tasks/@global:modifiers:StartFailJob",
+        json={"payload": {}},
+    )
+    assert resp.status_code in {201, 202}
+
+    # Wait enough time for the claim loop to pick up and attempt start()
+    time.sleep(2.0)
+
+    # The execute callback must NOT have been called
+    assert not executed.is_set(), (
+        "execute() was called despite start() raising a transient error"
+    )
+    manager.disconnect()

@@ -5,7 +5,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, Callable
+from typing import Any, AsyncGenerator, Callable
 
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -255,8 +255,22 @@ async def run_sweeper(
     get_session: Callable[[], AsyncGenerator[AsyncSession, None]],
     settings: JobLibSettings,
     tsio: AsyncServerWrapper | None = None,
+    on_frame_rooms: Callable[[set[str]], Any] | None = None,
 ) -> None:
-    """Background task that runs cleanup periodically."""
+    """Background task that runs cleanup periodically.
+
+    Parameters
+    ----------
+    get_session
+        Async generator yielding database sessions.
+    settings
+        JobLib configuration.
+    tsio
+        Optional Socket.IO server for broadcasting events.
+    on_frame_rooms
+        Optional async callback invoked with room IDs that had frame providers
+        removed. Host apps use this to clean up external state (e.g. Redis keys).
+    """
     timeout = timedelta(seconds=settings.worker_timeout_seconds)
     internal_timeout = timedelta(seconds=settings.internal_task_timeout_seconds)
     interval = settings.sweeper_interval_seconds
@@ -272,12 +286,14 @@ async def run_sweeper(
         await asyncio.sleep(interval)
         try:
             async for session in get_session():
-                count, emissions, _frame_rooms = await cleanup_stale_workers(
+                count, emissions, frame_rooms = await cleanup_stale_workers(
                     session, timeout
                 )
                 if count > 0:
                     logger.info("Cleaned up %s stale worker(s)", count)
                 await emit(tsio, emissions)
+                if frame_rooms and on_frame_rooms is not None:
+                    await on_frame_rooms(frame_rooms)
 
             async for session in get_session():
                 count, emissions = await cleanup_stuck_internal_tasks(

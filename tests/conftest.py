@@ -181,19 +181,6 @@ class _MockClientApi:
         response.raise_for_status()
 
 
-class ToggleableTransport(httpx.BaseTransport):
-    """Wraps a real transport; can simulate network outages."""
-
-    def __init__(self, real: httpx.BaseTransport) -> None:
-        self._real = real
-        self.reachable = True
-
-    def handle_request(self, request: httpx.Request) -> httpx.Response:
-        if not self.reachable:
-            raise httpx.ConnectError("Simulated network outage")
-        return self._real.handle_request(request)
-
-
 class _FsProvider(Provider):
     """Test provider for filesystem reads."""
 

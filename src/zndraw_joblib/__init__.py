@@ -3,10 +3,13 @@
 
 from zndraw_joblib.client import Category, ClaimedTask, Extension, JobManager
 from zndraw_joblib.dependencies import (
+    FrameRoomCleanup,
+    FrameRoomCleanupDep,
     JobLibSettingsDep,
     ResultBackend,
     ResultBackendDep,
     WritableRoomDep,
+    get_frame_room_cleanup,
     get_joblib_settings,
     get_result_backend,
     get_tsio,
@@ -91,6 +94,9 @@ __all__ = [
     "get_result_backend",
     "ResultBackend",
     "ResultBackendDep",
+    "get_frame_room_cleanup",
+    "FrameRoomCleanup",
+    "FrameRoomCleanupDep",
     "request_hash",
     "verify_writable_room",
     "WritableRoomDep",

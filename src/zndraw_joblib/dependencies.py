@@ -105,6 +105,32 @@ async def get_result_backend() -> ResultBackend:
 ResultBackendDep = Annotated[ResultBackend, Depends(get_result_backend)]
 
 
+@runtime_checkable
+class FrameRoomCleanup(Protocol):
+    """Protocol for cleaning up frame state when providers are removed."""
+
+    async def __call__(self, room_ids: set[str]) -> None:
+        """Clean up external frame state (e.g. Redis keys) for given room IDs."""
+        ...
+
+
+async def _noop_frame_cleanup(room_ids: set[str]) -> None:
+    """Default no-op frame cleanup."""
+
+
+async def get_frame_room_cleanup() -> FrameRoomCleanup:
+    """Return the configured FrameRoomCleanup callback.
+
+    Host apps should override this dependency via
+    ``app.dependency_overrides[get_frame_room_cleanup]``
+    to add Redis key cleanup and FramesInvalidate emission.
+    """
+    return _noop_frame_cleanup  # type: ignore[return-value]
+
+
+FrameRoomCleanupDep = Annotated[FrameRoomCleanup, Depends(get_frame_room_cleanup)]
+
+
 def request_hash(params: dict[str, Any]) -> str:
     """Return a SHA-256 hex digest of the canonicalized JSON representation."""
     canonical = json.dumps(params, sort_keys=True, separators=(",", ":"))
