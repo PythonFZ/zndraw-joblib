@@ -13,6 +13,7 @@ Addresses deferred performance issues from code review: long-poll session holdin
 ```python
 from contextlib import asynccontextmanager
 
+
 async def get_session_factory(
     auth_settings: Annotated[AuthSettings, Depends(get_auth_settings)],
 ) -> Callable[[], AsyncContextManager[AsyncSession]]:
@@ -20,7 +21,9 @@ async def get_session_factory(
     async def create_session():
         async for session in get_async_session(auth_settings):
             yield session
+
     return create_session
+
 
 SessionFactoryDep = Annotated[..., Depends(get_session_factory)]
 ```
@@ -44,7 +47,8 @@ result = await session.execute(
     select(Job)
     .where(...)
     .options(selectinload(Job.workers))
-    .offset(offset).limit(limit)
+    .offset(offset)
+    .limit(limit)
 )
 for job in jobs:
     worker_ids = [w.id for w in job.workers]  # pre-loaded
@@ -54,9 +58,7 @@ for job in jobs:
 
 ```python
 result = await session.execute(
-    select(Worker)
-    .where(Worker.id.in_(worker_ids))
-    .options(selectinload(Worker.jobs))
+    select(Worker).where(Worker.id.in_(worker_ids)).options(selectinload(Worker.jobs))
 )
 for worker in workers:
     job_count = len(worker.jobs)  # pre-loaded
@@ -117,7 +119,9 @@ The `_task_response` (singular) helper remains for single-task endpoints.
 
 ```python
 from typing import Generic, TypeVar
+
 T = TypeVar("T")
+
 
 class PaginatedResponse(BaseModel, Generic[T]):
     items: list[T]
@@ -139,7 +143,9 @@ async def list_jobs(
     offset: int = Query(default=0, ge=0),
 ):
     # ... build base query ...
-    total_result = await session.execute(select(func.count()).select_from(query.subquery()))
+    total_result = await session.execute(
+        select(func.count()).select_from(query.subquery())
+    )
     total = total_result.scalar()
 
     query = query.offset(offset).limit(limit)

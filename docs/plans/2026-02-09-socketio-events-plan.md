@@ -41,7 +41,9 @@ def test_jobs_invalidate_frozen():
 
 
 def test_task_available_frozen():
-    ev = TaskAvailable(job_name="@global:modifiers:Rotate", room_id="room1", task_id="abc")
+    ev = TaskAvailable(
+        job_name="@global:modifiers:Rotate", room_id="room1", task_id="abc"
+    )
     assert ev.job_name == "@global:modifiers:Rotate"
     # Frozen: assignment should raise
     try:
@@ -78,11 +80,15 @@ def test_emission_dedup_task_status():
     now = datetime.now(timezone.utc)
     emissions = {
         Emission(
-            TaskStatusEvent(id="a", name="j", room_id="r", status="failed", created_at=now),
+            TaskStatusEvent(
+                id="a", name="j", room_id="r", status="failed", created_at=now
+            ),
             "room:r",
         ),
         Emission(
-            TaskStatusEvent(id="b", name="j", room_id="r", status="failed", created_at=now),
+            TaskStatusEvent(
+                id="b", name="j", room_id="r", status="failed", created_at=now
+            ),
             "room:r",
         ),
     }
@@ -147,7 +153,9 @@ class TaskStatusEvent(BaseModel):
     id: str
     name: str
     room_id: str
-    status: Literal["pending", "claimed", "running", "completed", "failed", "cancelled"] # TODO: import from TaskStatus so they are shared!
+    status: Literal[
+        "pending", "claimed", "running", "completed", "failed", "cancelled"
+    ]  # TODO: import from TaskStatus so they are shared!
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -319,7 +327,9 @@ async def test_cleanup_stale_workers_returns_emissions(
 async def test_cleanup_stuck_internal_returns_emissions(async_session_factory):
     """cleanup_stuck_internal_tasks should return count and emissions."""
     async with async_session_factory() as session:
-        job = Job(room_id="@internal", category="modifiers", name="EmitInternal", schema_={})
+        job = Job(
+            room_id="@internal", category="modifiers", name="EmitInternal", schema_={}
+        )
         session.add(job)
         await session.flush()
         task = Task(
@@ -435,9 +445,7 @@ async def _soft_delete_orphan_job(
     return set()
 
 
-async def _cleanup_worker(
-    session: AsyncSession, worker: Worker
-) -> set[Emission]:
+async def _cleanup_worker(session: AsyncSession, worker: Worker) -> set[Emission]:
     """Clean up a worker by failing tasks, removing links, and soft-deleting orphan jobs.
 
     Returns emissions to broadcast after commit.
@@ -929,9 +937,7 @@ TsioDep = Annotated[object | None, Depends(get_tsio)]
 
 3. Add helper to build TaskStatusEvent from a Task + session:
 ```python
-async def _task_status_emission(
-    session: AsyncSession, task: Task
-) -> Emission:
+async def _task_status_emission(session: AsyncSession, task: Task) -> Emission:
     """Build a TaskStatusEvent emission from a task."""
     result = await session.execute(select(Job).where(Job.id == task.job_id))
     job = result.scalar_one_or_none()
@@ -1078,11 +1084,11 @@ from zndraw_joblib.events import (
 
 Add to `__all__`:
 ```python
-    # Events
-    "JobsInvalidate",
-    "TaskAvailable",
-    "TaskStatusEvent",
-    "Emission",
+# Events
+("JobsInvalidate",)
+("TaskAvailable",)
+("TaskStatusEvent",)
+("Emission",)
 ```
 
 Also add `get_tsio` to imports and `__all__`:
@@ -1091,9 +1097,9 @@ from zndraw_joblib.dependencies import get_settings, get_tsio
 ```
 
 ```python
-    # Dependencies
-    "get_settings",
-    "get_tsio",
+# Dependencies
+("get_settings",)
+("get_tsio",)
 ```
 
 **Step 4: Run test to verify it passes**

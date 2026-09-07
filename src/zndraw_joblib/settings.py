@@ -18,14 +18,14 @@ class JobLibSettings(BaseSettings):
         settings_cls: type[BaseSettings],
         init_settings: PydanticBaseSettingsSource,
         env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
-        file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """Add pyproject.toml as a configuration source.
 
         Priority (highest to lowest): init, env vars, pyproject.toml.
         """
-        from pydantic_settings import PyprojectTomlConfigSettingsSource  # noqa: PLC0415
+        from pydantic_settings import PyprojectTomlConfigSettingsSource
 
         return (
             init_settings,
