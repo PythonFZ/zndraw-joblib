@@ -1,5 +1,5 @@
 # tests/test_models.py
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from zndraw_joblib.models import (
@@ -31,13 +31,13 @@ def test_job_full_name_private():
 
 def test_worker_is_alive():
     user_id = UUID("12345678-1234-5678-1234-567812345678")
-    worker = Worker(user_id=user_id, last_heartbeat=datetime.now(timezone.utc))
+    worker = Worker(user_id=user_id, last_heartbeat=datetime.now(UTC))
     assert worker.is_alive(timedelta(seconds=60)) is True
 
 
 def test_worker_is_dead():
     user_id = UUID("12345678-1234-5678-1234-567812345678")
-    old_time = datetime.now(timezone.utc) - timedelta(seconds=120)
+    old_time = datetime.now(UTC) - timedelta(seconds=120)
     worker = Worker(user_id=user_id, last_heartbeat=old_time)
     assert worker.is_alive(timedelta(seconds=60)) is False
 

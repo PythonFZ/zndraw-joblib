@@ -4,8 +4,9 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -94,7 +95,7 @@ async def cleanup_worker(
         The frame provider room IDs allow callers to clean up external state (e.g. Redis keys).
     """
     emissions: set[Emission] = set()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Fail any claimed/running tasks owned by this worker
     result = await session.execute(
@@ -183,7 +184,7 @@ async def cleanup_stale_workers(
         Tuple of (count of workers cleaned up, emissions, room IDs that had
         frame providers removed).
     """
-    cutoff = datetime.now(timezone.utc) - timeout
+    cutoff = datetime.now(UTC) - timeout
     all_emissions: set[Emission] = set()
     all_frame_rooms: set[str] = set()
 
@@ -217,8 +218,8 @@ async def cleanup_stuck_internal_tasks(
     Returns:
         Tuple of (count of tasks failed, set of emissions).
     """
-    cutoff = datetime.now(timezone.utc) - timeout
-    now = datetime.now(timezone.utc)
+    cutoff = datetime.now(UTC) - timeout
+    now = datetime.now(UTC)
     emissions: set[Emission] = set()
 
     result = await session.execute(
