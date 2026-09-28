@@ -69,7 +69,9 @@ When an `execute` callback is provided to `JobManager`, two daemon threads start
 def my_execute(task: ClaimedTask) -> None:
     task.extension.run(vis)
 
+
 with JobManager(api, tsio, execute=my_execute) as manager:
+
     @manager.register
     class Rotate(Extension):
         category: ClassVar[Category] = Category.MODIFIER
@@ -88,13 +90,13 @@ Only the heartbeat thread runs. The caller uses `claim()` for single claims or `
 
 ```python
 with JobManager(api, tsio) as manager:
+
     @manager.register
     class Rotate(Extension):
         category: ClassVar[Category] = Category.MODIFIER
         angle: float = 0.0
 
-        def run(self, vis, **kwargs):
-            ...
+        def run(self, vis, **kwargs): ...
 
     for task in manager.listen(polling_interval=2.0):
         manager.start(task)

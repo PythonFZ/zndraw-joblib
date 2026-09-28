@@ -15,6 +15,7 @@ class JoinJobRoom(FrozenEvent):
     job_name: str
     worker_id: str
 
+
 class LeaveJobRoom(FrozenEvent):
     job_name: str
     worker_id: str

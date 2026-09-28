@@ -17,9 +17,9 @@ heartbeat, claim loop, signal handling, SIO event wiring.
 manager = JobManager(
     api=api,
     tsio=tsio,
-    execute=my_callback,           # optional: task execution callback
-    heartbeat_interval=30.0,       # optional
-    polling_interval=2.0,          # optional
+    execute=my_callback,  # optional: task execution callback
+    heartbeat_interval=30.0,  # optional
+    polling_interval=2.0,  # optional
 )
 ```
 
