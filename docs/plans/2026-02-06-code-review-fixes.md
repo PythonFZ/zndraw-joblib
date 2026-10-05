@@ -101,7 +101,11 @@ logger.exception(f"Error in sweeper: {e}")
 
 # After:
 logger.info("Cleaning up stale worker: %s", worker.id)
-logger.info("Starting sweeper with interval=%ss, worker_timeout=%ss", interval, settings.worker_timeout_seconds)
+logger.info(
+    "Starting sweeper with interval=%ss, worker_timeout=%ss",
+    interval,
+    settings.worker_timeout_seconds,
+)
 logger.info("Cleaned up %s stale worker(s)", count)
 logger.exception("Error in sweeper: %s", e)
 ```
@@ -127,10 +131,10 @@ logger.exception("Error in sweeper: %s", e)
 
 ```python
 # Before:
-created_at=datetime.utcnow(),
+created_at = (datetime.utcnow(),)
 
 # After:
-created_at=datetime.now(timezone.utc),
+created_at = (datetime.now(timezone.utc),)
 ```
 
 Add `from datetime import timezone` to imports.

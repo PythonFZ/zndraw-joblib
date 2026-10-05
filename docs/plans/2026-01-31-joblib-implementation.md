@@ -236,50 +236,59 @@ async def problem_exception_handler(_request: Request, exc: Exception) -> JSONRe
 
 # Problem Types
 
+
 class JobNotFound(ProblemType):
     """The requested job does not exist."""
+
     title: ClassVar[str] = "Not Found"
     status: ClassVar[int] = 404
 
 
 class SchemaConflict(ProblemType):
     """Job schema differs from existing registration."""
+
     title: ClassVar[str] = "Conflict"
     status: ClassVar[int] = 409
 
 
 class InvalidCategory(ProblemType):
     """Job category is not in the allowed list."""
+
     title: ClassVar[str] = "Bad Request"
     status: ClassVar[int] = 400
 
 
 class WorkerNotFound(ProblemType):
     """The requested worker does not exist."""
+
     title: ClassVar[str] = "Not Found"
     status: ClassVar[int] = 404
 
 
 class TaskNotFound(ProblemType):
     """The requested task does not exist."""
+
     title: ClassVar[str] = "Not Found"
     status: ClassVar[int] = 404
 
 
 class InvalidTaskTransition(ProblemType):
     """Invalid task status transition."""
+
     title: ClassVar[str] = "Conflict"
     status: ClassVar[int] = 409
 
 
 class InvalidRoomId(ProblemType):
     """Room ID contains invalid characters (@ or :)."""
+
     title: ClassVar[str] = "Bad Request"
     status: ClassVar[int] = 400
 
 
 class Forbidden(ProblemType):
     """Admin privileges required for this operation."""
+
     title: ClassVar[str] = "Forbidden"
     status: ClassVar[int] = 403
 ```
@@ -768,7 +777,12 @@ from sqlmodel import SQLModel, create_engine, Session
 from sqlmodel.pool import StaticPool
 
 from zndraw_joblib.router import router
-from zndraw_joblib.dependencies import get_db_session, get_current_identity, get_is_admin, get_settings
+from zndraw_joblib.dependencies import (
+    get_db_session,
+    get_current_identity,
+    get_is_admin,
+    get_settings,
+)
 from zndraw_joblib.models import Job, Worker, WorkerJobLink
 
 
@@ -843,7 +857,11 @@ def test_register_job_schema_conflict(client):
     # Second registration with different schema
     response = client.put(
         "/v1/joblib/rooms/@global/jobs",
-        json={"category": "modifiers", "name": "Rotate", "schema": {"angle": 0, "axis": "z"}},
+        json={
+            "category": "modifiers",
+            "name": "Rotate",
+            "schema": {"angle": 0, "axis": "z"},
+        },
     )
     assert response.status_code == 409
     # TODO: use pydantic model validation!
@@ -1047,7 +1065,11 @@ from sqlmodel import SQLModel, create_engine, Session
 from sqlmodel.pool import StaticPool
 
 from zndraw_joblib.router import router
-from zndraw_joblib.dependencies import get_db_session, get_current_identity, get_is_admin
+from zndraw_joblib.dependencies import (
+    get_db_session,
+    get_current_identity,
+    get_is_admin,
+)
 
 
 @pytest.fixture
@@ -1201,7 +1223,9 @@ async def get_job(
 
     # For room requests, allow access to both @global and room-specific jobs
     if room_id != "@global" and job_room_id not in ("@global", room_id):
-        raise JobNotFound.exception(detail=f"Job '{job_name}' not accessible from room '{room_id}'")
+        raise JobNotFound.exception(
+            detail=f"Job '{job_name}' not accessible from room '{room_id}'"
+        )
 
     job = db.exec(
         select(Job).where(
@@ -1260,7 +1284,11 @@ from sqlmodel import SQLModel, create_engine, Session
 from sqlmodel.pool import StaticPool
 
 from zndraw_joblib.router import router
-from zndraw_joblib.dependencies import get_db_session, get_current_identity, get_is_admin
+from zndraw_joblib.dependencies import (
+    get_db_session,
+    get_current_identity,
+    get_is_admin,
+)
 from zndraw_joblib.models import Task, TaskStatus
 
 
@@ -1457,7 +1485,11 @@ from sqlmodel import SQLModel, create_engine, Session
 from sqlmodel.pool import StaticPool
 
 from zndraw_joblib.router import router
-from zndraw_joblib.dependencies import get_db_session, get_current_identity, get_is_admin
+from zndraw_joblib.dependencies import (
+    get_db_session,
+    get_current_identity,
+    get_is_admin,
+)
 from zndraw_joblib.models import TaskStatus
 
 
@@ -1687,7 +1719,12 @@ from sqlmodel import SQLModel, create_engine, Session
 from sqlmodel.pool import StaticPool
 
 from zndraw_joblib.router import router
-from zndraw_joblib.dependencies import get_db_session, get_current_identity, get_is_admin, get_redis_client
+from zndraw_joblib.dependencies import (
+    get_db_session,
+    get_current_identity,
+    get_is_admin,
+    get_redis_client,
+)
 from zndraw_joblib.models import TaskStatus
 
 
@@ -1887,7 +1924,7 @@ async def update_task_status(
     task_id: UUID,
     request: TaskUpdateRequest,
     db: Session = Depends(get_db_session),
-    redis = Depends(get_redis_client),
+    redis=Depends(get_redis_client),
 ):
     """Update task status. Publishes to Redis on terminal states."""
     task = db.exec(select(Task).where(Task.id == task_id)).first()
@@ -1966,7 +2003,11 @@ from sqlmodel import SQLModel, create_engine, Session
 from sqlmodel.pool import StaticPool
 
 from zndraw_joblib.router import router
-from zndraw_joblib.dependencies import get_db_session, get_current_identity, get_is_admin
+from zndraw_joblib.dependencies import (
+    get_db_session,
+    get_current_identity,
+    get_is_admin,
+)
 from zndraw_joblib.models import Worker
 
 
@@ -2135,6 +2176,7 @@ from zndraw_joblib.sweeper import run_cleanup_sweeper, cleanup_stale_workers
 def test_cleanup_stale_workers_signature():
     """Verify cleanup function exists with correct signature."""
     import inspect
+
     sig = inspect.signature(cleanup_stale_workers)
     params = list(sig.parameters.keys())
     assert "db" in params
@@ -2310,6 +2352,7 @@ def test_claimed_task_model():
 def test_api_manager_protocol():
     """Verify ApiManager is a Protocol with required attributes."""
     import typing
+
     assert typing.get_origin(ApiManager) is None  # Protocol, not generic
 
 
