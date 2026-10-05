@@ -9,9 +9,10 @@ import threading
 import time
 import traceback
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, ClassVar, Generic, Iterator, Protocol, TypeVar
+from typing import Any, ClassVar, Generic, Protocol, TypeVar
 from uuid import UUID
 
 import httpx
@@ -421,7 +422,7 @@ class JobManager:
         )
         data = resp.json()
         full_name = f"{room_id}:{category}:{name}"
-        if "worker_id" in data and data["worker_id"]:
+        if data.get("worker_id"):
             self._worker_id = UUID(data["worker_id"])
         if resp.status_code == 200:
             logger.info("Already registered: %s", full_name)
@@ -621,7 +622,7 @@ class JobManager:
         provider_id = UUID(data["id"])
         full_name = f"{room}:{provider_cls.category}:{name}"
 
-        if "worker_id" in data and data["worker_id"]:
+        if data.get("worker_id"):
             self._worker_id = UUID(data["worker_id"])
 
         self._providers[full_name] = _RegisteredProvider(
