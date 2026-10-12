@@ -51,6 +51,7 @@ Create/add to `tests/test_router_workers.py`:
 import pytest
 from httpx import AsyncClient
 
+
 @pytest.mark.asyncio
 async def test_list_workers_empty(client: AsyncClient):
     """List workers returns empty list when no workers exist."""
@@ -99,6 +100,7 @@ from zndraw_joblib.schemas import (
     WorkerSummary,  # Add this
 )
 
+
 # Add endpoint before the PATCH /workers/{worker_id}
 @router.get("/workers", response_model=list[WorkerSummary])
 async def list_workers(
@@ -109,7 +111,9 @@ async def list_workers(
     result = []
     for worker in workers:
         job_count = len(
-            db.exec(select(WorkerJobLink).where(WorkerJobLink.worker_id == worker.id)).all()
+            db.exec(
+                select(WorkerJobLink).where(WorkerJobLink.worker_id == worker.id)
+            ).all()
         )
         result.append(
             WorkerSummary(
@@ -159,7 +163,9 @@ async def test_list_workers_for_room_filters_by_room(client: AsyncClient, regist
     """List workers for room only returns workers serving that room."""
     # Worker A serves room1 and @global
     await register_job("room1", "modifiers", "job1", worker_id="worker-a")
-    await register_job("@global", "modifiers", "global-job", worker_id="worker-a", is_admin=True)
+    await register_job(
+        "@global", "modifiers", "global-job", worker_id="worker-a", is_admin=True
+    )
 
     # Worker B serves room2
     await register_job("room2", "modifiers", "job2", worker_id="worker-b")
@@ -183,7 +189,9 @@ async def test_list_workers_for_room_filters_by_room(client: AsyncClient, regist
 @pytest.mark.asyncio
 async def test_list_workers_for_global_room(client: AsyncClient, register_job):
     """List workers for @global room only returns workers serving @global jobs."""
-    await register_job("@global", "modifiers", "global-job", worker_id="worker-a", is_admin=True)
+    await register_job(
+        "@global", "modifiers", "global-job", worker_id="worker-a", is_admin=True
+    )
     await register_job("room1", "modifiers", "job1", worker_id="worker-b")
 
     response = await client.get("/v1/joblib/rooms/@global/workers")
@@ -232,7 +240,9 @@ async def list_workers_for_room(
 
     # Find workers linked to these jobs
     worker_ids = db.exec(
-        select(WorkerJobLink.worker_id).where(WorkerJobLink.job_id.in_(job_ids)).distinct()
+        select(WorkerJobLink.worker_id)
+        .where(WorkerJobLink.job_id.in_(job_ids))
+        .distinct()
     ).all()
 
     if not worker_ids:
@@ -242,7 +252,9 @@ async def list_workers_for_room(
     result = []
     for worker in workers:
         job_count = len(
-            db.exec(select(WorkerJobLink).where(WorkerJobLink.worker_id == worker.id)).all()
+            db.exec(
+                select(WorkerJobLink).where(WorkerJobLink.worker_id == worker.id)
+            ).all()
         )
         result.append(
             WorkerSummary(
@@ -315,7 +327,9 @@ async def test_list_tasks_for_room_empty(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_for_room_returns_tasks(client: AsyncClient, register_job, submit_task):
+async def test_list_tasks_for_room_returns_tasks(
+    client: AsyncClient, register_job, submit_task
+):
     """List tasks for room returns all tasks submitted to that room."""
     await register_job("room1", "modifiers", "job1", worker_id="worker-a")
     await register_job("room2", "modifiers", "job2", worker_id="worker-b")
@@ -337,7 +351,9 @@ async def test_list_tasks_for_room_returns_tasks(client: AsyncClient, register_j
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_for_room_with_status_filter(client: AsyncClient, register_job, submit_task):
+async def test_list_tasks_for_room_with_status_filter(
+    client: AsyncClient, register_job, submit_task
+):
     """List tasks for room can filter by status."""
     await register_job("room1", "modifiers", "job1", worker_id="worker-a")
 
@@ -356,7 +372,9 @@ async def test_list_tasks_for_room_with_status_filter(client: AsyncClient, regis
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_for_room_includes_queue_position(client: AsyncClient, register_job, submit_task):
+async def test_list_tasks_for_room_includes_queue_position(
+    client: AsyncClient, register_job, submit_task
+):
     """List tasks includes queue_position for pending tasks."""
     await register_job("room1", "modifiers", "job1", worker_id="worker-a")
 
@@ -391,6 +409,7 @@ from zndraw_joblib.schemas import (
     TaskSummary,
 )
 from typing import Optional
+
 
 # Add endpoint
 @router.get("/rooms/{room_id}/tasks", response_model=list[TaskSummary])
@@ -469,13 +488,17 @@ async def test_list_tasks_for_job_empty(client: AsyncClient, register_job):
     """List tasks for job returns empty list when no tasks exist."""
     await register_job("room1", "modifiers", "job1", worker_id="worker-a")
 
-    response = await client.get("/v1/joblib/rooms/room1/jobs/room1:modifiers:job1/tasks")
+    response = await client.get(
+        "/v1/joblib/rooms/room1/jobs/room1:modifiers:job1/tasks"
+    )
     assert response.status_code == 200
     assert response.json() == []
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_for_job_filters_by_job(client: AsyncClient, register_job, submit_task):
+async def test_list_tasks_for_job_filters_by_job(
+    client: AsyncClient, register_job, submit_task
+):
     """List tasks for job only returns tasks for that specific job."""
     await register_job("room1", "modifiers", "job1", worker_id="worker-a")
     await register_job("room1", "modifiers", "job2", worker_id="worker-a")
@@ -483,7 +506,9 @@ async def test_list_tasks_for_job_filters_by_job(client: AsyncClient, register_j
     task1 = await submit_task("room1", "room1:modifiers:job1", {"data": 1})
     task2 = await submit_task("room1", "room1:modifiers:job2", {"data": 2})
 
-    response = await client.get("/v1/joblib/rooms/room1/jobs/room1:modifiers:job1/tasks")
+    response = await client.get(
+        "/v1/joblib/rooms/room1/jobs/room1:modifiers:job1/tasks"
+    )
     assert response.status_code == 200
     tasks = response.json()
     assert len(tasks) == 1
@@ -493,19 +518,27 @@ async def test_list_tasks_for_job_filters_by_job(client: AsyncClient, register_j
 @pytest.mark.asyncio
 async def test_list_tasks_for_job_not_found(client: AsyncClient):
     """List tasks for non-existent job returns 404."""
-    response = await client.get("/v1/joblib/rooms/room1/jobs/room1:modifiers:nonexistent/tasks")
+    response = await client.get(
+        "/v1/joblib/rooms/room1/jobs/room1:modifiers:nonexistent/tasks"
+    )
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_for_global_job_from_room(client: AsyncClient, register_job, submit_task):
+async def test_list_tasks_for_global_job_from_room(
+    client: AsyncClient, register_job, submit_task
+):
     """Can list tasks for @global job from any room."""
-    await register_job("@global", "modifiers", "global-job", worker_id="worker-a", is_admin=True)
+    await register_job(
+        "@global", "modifiers", "global-job", worker_id="worker-a", is_admin=True
+    )
 
     # Submit task from room1 to global job
     task1 = await submit_task("room1", "@global:modifiers:global-job", {"data": 1})
 
-    response = await client.get("/v1/joblib/rooms/room1/jobs/@global:modifiers:global-job/tasks")
+    response = await client.get(
+        "/v1/joblib/rooms/room1/jobs/@global:modifiers:global-job/tasks"
+    )
     assert response.status_code == 200
     tasks = response.json()
     assert len(tasks) == 1
@@ -522,7 +555,9 @@ Expected: FAIL (404)
 Add to `src/zndraw_joblib/router.py`:
 
 ```python
-@router.get("/rooms/{room_id}/jobs/{job_name:path}/tasks", response_model=list[TaskSummary])
+@router.get(
+    "/rooms/{room_id}/jobs/{job_name:path}/tasks", response_model=list[TaskSummary]
+)
 async def list_tasks_for_job(
     room_id: str,
     job_name: str,
@@ -541,7 +576,9 @@ async def list_tasks_for_job(
 
     # Validate access (same logic as get_job)
     if room_id != "@global" and job_room_id not in ("@global", room_id):
-        raise JobNotFound.exception(detail=f"Job '{job_name}' not accessible from room '{room_id}'")
+        raise JobNotFound.exception(
+            detail=f"Job '{job_name}' not accessible from room '{room_id}'"
+        )
 
     job = db.exec(
         select(Job).where(
@@ -613,7 +650,9 @@ Add to `tests/test_router_tasks.py`:
 
 ```python
 @pytest.mark.asyncio
-async def test_get_task_includes_queue_position(client: AsyncClient, register_job, submit_task):
+async def test_get_task_includes_queue_position(
+    client: AsyncClient, register_job, submit_task
+):
     """GET /tasks/{task_id} includes queue_position for pending tasks."""
     await register_job("room1", "modifiers", "job1", worker_id="worker-a")
 
@@ -632,7 +671,9 @@ async def test_get_task_includes_queue_position(client: AsyncClient, register_jo
 
 
 @pytest.mark.asyncio
-async def test_get_task_queue_position_null_for_non_pending(client: AsyncClient, register_job, submit_task):
+async def test_get_task_queue_position_null_for_non_pending(
+    client: AsyncClient, register_job, submit_task
+):
     """GET /tasks/{task_id} returns null queue_position for non-pending tasks."""
     await register_job("room1", "modifiers", "job1", worker_id="worker-a")
 
