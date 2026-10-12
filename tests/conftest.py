@@ -3,8 +3,9 @@
 
 import asyncio
 import uuid
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, ClassVar
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import httpx
@@ -125,7 +126,7 @@ class InMemoryResultBackend:
         try:
             await asyncio.wait_for(event.wait(), timeout=timeout)
             return self._store.get(key)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
         finally:
             waiters = self._waiters.get(key, [])
@@ -325,9 +326,8 @@ async def async_client(async_session_factory, mock_current_user):
 
     @asynccontextmanager
     async def locked_session_maker():
-        async with db_lock:
-            async with async_session_factory() as session:
-                yield session
+        async with db_lock, async_session_factory() as session:
+            yield session
 
     app = _build_app(
         session_maker=locked_session_maker,
