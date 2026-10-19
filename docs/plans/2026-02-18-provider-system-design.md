@@ -111,6 +111,7 @@ class Provider(BaseModel):
 ```python
 # In zndraw-fastapi (not joblib — joblib is type-agnostic)
 
+
 class FilesystemRead(Provider):
     """Read parameters for filesystem providers.
 
@@ -185,21 +186,19 @@ class ProviderRecord(SQLModel, table=True):
     __tablename__ = "provider"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    type: str = Field(index=True)              # "filesystem", "frame_source"
-    name: str = Field(index=True)              # "local", "s3-bucket"
-    scope: str = Field(index=True)             # "@global" or room_id
+    type: str = Field(index=True)  # "filesystem", "frame_source"
+    name: str = Field(index=True)  # "local", "s3-bucket"
+    scope: str = Field(index=True)  # "@global" or room_id
     schema_: dict = Field(sa_column=Column(JSON))  # JSON Schema from Provider model
     user_id: UUID = Field(foreign_key="user.id")
-    worker_id: UUID | None = Field(            # Links to joblib Worker (for actions)
+    worker_id: UUID | None = Field(  # Links to joblib Worker (for actions)
         default=None, foreign_key="worker.id"
     )
-    sid: str                                   # Socket.IO SID for dispatch
+    sid: str  # Socket.IO SID for dispatch
     last_heartbeat: datetime = Field(default_factory=utcnow)
     created_at: datetime = Field(default_factory=utcnow)
 
-    __table_args__ = (
-        UniqueConstraint("type", "name", "scope"),
-    )
+    __table_args__ = (UniqueConstraint("type", "name", "scope"),)
 ```
 
 ### Why SQL (not just Redis)?
@@ -217,6 +216,7 @@ Read results are cached ephemerally — NOT persisted in SQL. The storage backen
 ```python
 # In zndraw_joblib/dependencies.py
 
+
 class ResultBackend(Protocol):
     """Protocol for provider result storage.
 
@@ -225,17 +225,28 @@ class ResultBackend(Protocol):
     """
 
     async def store(
-        self, provider_type: str, scope: str, name: str,
-        request_hash: str, data: bytes, ttl: int,
+        self,
+        provider_type: str,
+        scope: str,
+        name: str,
+        request_hash: str,
+        data: bytes,
+        ttl: int,
     ) -> None: ...
 
     async def get(
-        self, provider_type: str, scope: str, name: str,
+        self,
+        provider_type: str,
+        scope: str,
+        name: str,
         request_hash: str,
     ) -> bytes | None: ...
 
     async def delete(
-        self, provider_type: str, scope: str, name: str,
+        self,
+        provider_type: str,
+        scope: str,
+        name: str,
         request_hash: str,
     ) -> None: ...
 
@@ -275,6 +286,7 @@ class CompositeResultBackend(ResultBackend):
     async def get(self, provider_type, scope, name, request_hash):
         backend = self._backends.get(provider_type, self._default)
         return await backend.get(provider_type, scope, name, request_hash)
+
 
 # Wire it up:
 app.dependency_overrides[get_result_backend] = lambda: CompositeResultBackend(
@@ -360,32 +372,41 @@ All frozen Pydantic models (same pattern as existing joblib events):
 # Registration lifecycle
 class ProvidersInvalidate(FrozenEvent):
     """Provider list changed."""
+
     # Emitted to: room:{scope}
+
 
 # Read dispatch
 class ProviderRequest(FrozenEvent):
     """Server → Provider: process this read request."""
+
     request_id: str
     params: dict[str, Any]  # Validated against provider schema
     # Emitted to: provider:{type}:{scope}:{name}
 
+
 class ProviderResultReady(FrozenEvent):
     """Server → Frontend: result cached, refetch."""
+
     provider_type: str
     provider_name: str
     request_hash: str
     # Emitted to: room:{scope}
 
+
 # Client ↔ Server room management
 class JoinProviderRoom(FrozenEvent):
     """Client joins provider dispatch room."""
+
     provider_id: str
     type: str
     name: str
     scope: str
 
+
 class LeaveProviderRoom(FrozenEvent):
     """Client leaves provider dispatch room."""
+
     provider_id: str
     type: str
     name: str
@@ -467,12 +488,14 @@ class ProviderManager:
 
         # Join Socket.IO room for dispatch
         if self._tsio is not None:
-            self._tsio.emit(JoinProviderRoom(
-                provider_id=str(provider_id),
-                type=provider_cls.type,
-                name=name,
-                scope=scope,
-            ))
+            self._tsio.emit(
+                JoinProviderRoom(
+                    provider_id=str(provider_id),
+                    type=provider_cls.type,
+                    name=name,
+                    scope=scope,
+                )
+            )
 
         return provider_id
 
@@ -489,12 +512,14 @@ class ProviderManager:
         )
         # Leave Socket.IO room
         if self._tsio is not None:
-            self._tsio.emit(LeaveProviderRoom(
-                provider_id=str(reg.id),
-                type=type,
-                name=name,
-                scope=reg.scope,
-            ))
+            self._tsio.emit(
+                LeaveProviderRoom(
+                    provider_id=str(reg.id),
+                    type=type,
+                    name=name,
+                    scope=reg.scope,
+                )
+            )
 
     @property
     def handlers(self) -> dict[str, Any]:
@@ -575,7 +600,7 @@ by `provider_name` (which comes from the task payload — the user selected it i
 ```python
 class LoadFile(Extension):
     category: ClassVar[str] = "filesystem"
-    provider_name: str       # "local" or "s3-bucket" — set by frontend
+    provider_name: str  # "local" or "s3-bucket" — set by frontend
     path: str
     target_room: str
     start: int | None = None
@@ -624,16 +649,17 @@ async def cleanup_stale_providers(
     """Find providers with stale heartbeats and remove them."""
     threshold = utcnow() - timeout
     stale = await session.exec(
-        select(ProviderRecord)
-        .where(ProviderRecord.last_heartbeat < threshold)
+        select(ProviderRecord).where(ProviderRecord.last_heartbeat < threshold)
     )
     emissions: set[Emission] = set()
     for provider in stale:
         session.delete(provider)
-        emissions.add(Emission(
-            ProvidersInvalidate(),
-            f"room:{provider.scope}",
-        ))
+        emissions.add(
+            Emission(
+                ProvidersInvalidate(),
+                f"room:{provider.scope}",
+            )
+        )
     return len(stale), emissions
 ```
 
@@ -656,9 +682,13 @@ registers as the provider — no external Python client needed.
 
 ```python
 # In zndraw-fastapi lifespan:
-register_internal_providers(app, broker, [
-    LocalFilesystemRead,  # Server can list its own files
-])
+register_internal_providers(
+    app,
+    broker,
+    [
+        LocalFilesystemRead,  # Server can list its own files
+    ],
+)
 ```
 
 Internal providers have no SID, no heartbeat (they're the server itself), and reads are

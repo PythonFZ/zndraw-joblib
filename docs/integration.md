@@ -66,9 +66,11 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from zndraw_joblib import run_sweeper
 
+
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with session_maker() as session:
         yield session
+
 
 @asynccontextmanager
 async def lifespan(app):
@@ -78,6 +80,7 @@ async def lifespan(app):
     )
     yield
     task.cancel()
+
 
 app = FastAPI(lifespan=lifespan)
 ```
@@ -100,6 +103,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 db_lock = asyncio.Lock()
 
+
 @asynccontextmanager
 async def locked_session():
     async with db_lock:
@@ -121,6 +125,7 @@ from zndraw_auth import current_active_user
 from zndraw_auth.db import SessionDep
 from zndraw_joblib import verify_writable_room, validate_room_id
 
+
 async def get_writable_room(
     session: SessionDep,
     current_user: ...,  # your CurrentUserDep
@@ -131,6 +136,7 @@ async def get_writable_room(
     if room.locked and not current_user.is_superuser:
         raise HTTPException(status_code=423, detail="Room is locked")
     return room_id
+
 
 app.dependency_overrides[verify_writable_room] = get_writable_room
 ```
@@ -143,6 +149,7 @@ Provider endpoints require a `ResultBackend` for caching and coordinating read r
 
 ```python
 from zndraw_joblib import get_result_backend, ResultBackend
+
 
 class RedisResultBackend:
     def __init__(self, redis):
@@ -170,6 +177,7 @@ class RedisResultBackend:
     async def notify_key(self, key: str) -> None:
         # Publish notification via Redis pub/sub
         ...
+
 
 backend = RedisResultBackend(redis)
 app.dependency_overrides[get_result_backend] = lambda: backend
