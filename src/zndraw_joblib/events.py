@@ -99,7 +99,7 @@ class ProviderRequest(FrozenEvent):
         request_id: str,
         provider_name: str,
         params: dict[str, Any],
-    ) -> "ProviderRequest":
+    ) -> ProviderRequest:
         """Create from a dict, converting params to canonical JSON."""
         return cls(
             request_id=request_id,
