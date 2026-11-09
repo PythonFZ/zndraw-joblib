@@ -528,8 +528,10 @@ Replace:
 @pytest.fixture
 def mock_user_factory(mock_user: MockUser):
     """Factory for get_current_user override."""
+
     async def get_test_user() -> UserProtocol:
         return mock_user
+
     return get_test_user
 ```
 
@@ -540,11 +542,14 @@ Replace:
 @pytest.fixture
 def mock_superuser_factory(mock_user: MockUser):
     """Factory for get_current_superuser override."""
+
     async def get_test_superuser() -> UserProtocol:
         if not mock_user.is_superuser:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=403, detail="Not a superuser")
         return mock_user
+
     return get_test_superuser
 ```
 
@@ -583,6 +588,7 @@ Change from creating identity string to creating MockUser:
 @pytest.fixture
 def client_factory(db_session, mock_superuser_factory):
     """Factory to create test clients with different user identities."""
+
     def create_client(
         user_id: uuid.UUID | str | None = None,
         is_superuser: bool = True,
@@ -605,6 +611,7 @@ def client_factory(db_session, mock_superuser_factory):
         async def get_superuser() -> UserProtocol:
             if not user.is_superuser:
                 from fastapi import HTTPException
+
                 raise HTTPException(status_code=403, detail="Not a superuser")
             return user
 
@@ -705,17 +712,17 @@ git commit -m "fix: update tests for UUID-based user identity"
 
 Change the dependency exports from:
 ```python
-"get_current_identity",
-"get_db_session",
-"get_is_admin",
+("get_current_identity",)
+("get_db_session",)
+("get_is_admin",)
 ```
 
 To:
 ```python
-"get_async_session",
-"get_current_superuser",
-"get_current_user",
-"UserProtocol",
+("get_async_session",)
+("get_current_superuser",)
+("get_current_user",)
+("UserProtocol",)
 ```
 
 **Step 2: Update imports**
@@ -850,5 +857,7 @@ The host application (zndraw-fastapi) should provide:
 ```python
 app.dependency_overrides[get_async_session] = your_session_generator
 app.dependency_overrides[get_current_user] = fastapi_users.current_user(active=True)
-app.dependency_overrides[get_current_superuser] = fastapi_users.current_user(active=True, superuser=True)
+app.dependency_overrides[get_current_superuser] = fastapi_users.current_user(
+    active=True, superuser=True
+)
 ```

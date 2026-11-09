@@ -18,8 +18,11 @@ app = FastAPI()
 # 1. Override session maker dependency at auth level
 #    All database access (from auth and joblib) flows through this
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
 engine = create_async_engine("sqlite+aiosqlite:///./app.db")
-my_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+my_session_maker = async_sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
+)
 app.dependency_overrides[get_session_maker] = lambda: my_session_maker
 
 # 2. Override auth dependencies (from zndraw_auth)
@@ -30,10 +33,12 @@ app.dependency_overrides[get_session_maker] = lambda: my_session_maker
 app.add_exception_handler(ProblemException, problem_exception_handler)
 app.include_router(router)
 
+
 # 4. Start background sweeper
 async def get_session():
     async with my_session_maker() as session:
         yield session
+
 
 settings = JobLibSettings()
 # asyncio.create_task(run_sweeper(get_session=get_session, settings=settings))
@@ -69,6 +74,7 @@ The `verify_writable_room` dependency guards write endpoints (`register_job`, `s
 from fastapi import Path
 from zndraw_joblib import verify_writable_room, validate_room_id
 
+
 async def get_writable_room(
     session: SessionDep,
     current_user: CurrentUserDep,
@@ -80,6 +86,7 @@ async def get_writable_room(
     if room.locked and not current_user.is_superuser:
         raise HTTPException(status_code=423, detail="Room is locked")
     return room_id
+
 
 app.dependency_overrides[verify_writable_room] = get_writable_room
 ```
@@ -128,6 +135,7 @@ from zndraw_joblib import JobManager, Extension, Category
 
 # Auto-serve mode: background threads claim and execute tasks
 with JobManager(api, tsio=tsio, execute=my_execute) as manager:
+
     @manager.register
     class Rotate(Extension):
         category: ClassVar[Category] = Category.MODIFIER
@@ -149,6 +157,7 @@ Extensions are Pydantic models with a `category` ClassVar and a `run()` method:
 from typing import ClassVar, Any
 from zndraw_joblib import Extension, Category
 
+
 class Rotate(Extension):
     category: ClassVar[Category] = Category.MODIFIER  # or SELECTION, ANALYSIS
     angle: float = 0.0
@@ -168,16 +177,18 @@ When an `execute` callback is provided, `JobManager` runs background threads tha
 ```python
 from zndraw_joblib import JobManager, ClaimedTask
 
+
 def execute(task: ClaimedTask) -> None:
     """Called for each claimed task."""
     task.extension.run(vis)
+
 
 manager = JobManager(
     api,
     tsio=tsio,
     execute=execute,
-    polling_interval=2.0,      # how often to poll for tasks (seconds)
-    heartbeat_interval=30.0,   # heartbeat frequency (seconds)
+    polling_interval=2.0,  # how often to poll for tasks (seconds)
+    heartbeat_interval=30.0,  # heartbeat frequency (seconds)
 )
 ```
 
@@ -194,11 +205,14 @@ Without `execute`, tasks must be claimed and processed manually:
 ```python
 manager = JobManager(api, tsio=tsio)
 
+
 @manager.register
 class Rotate(Extension):
     category: ClassVar[Category] = Category.MODIFIER
     angle: float = 0.0
+
     def run(self, vis, **kwargs): ...
+
 
 # Manual claim-execute loop
 for task in manager.listen(polling_interval=2.0):
@@ -227,12 +241,14 @@ Providers handle server-dispatched read requests (see [Providers](#providers)):
 ```python
 from zndraw_joblib import Provider
 
+
 class FilesystemRead(Provider):
     category: ClassVar[str] = "filesystem"
     path: str = "/"
 
     def read(self, handler):
         return handler.ls(self.path, detail=True)
+
 
 # Binary provider (e.g. msgpack, arrow, parquet)
 class AtomsProvider(Provider):
@@ -242,6 +258,7 @@ class AtomsProvider(Provider):
 
     def read(self, handler) -> bytes:
         return handler.get_atoms_msgpack(self.index)
+
 
 manager.register_provider(
     FilesystemRead,
@@ -370,6 +387,7 @@ Provider reads require a `ResultBackend` for caching and inflight coalescing. Th
 ```python
 from zndraw_joblib.dependencies import get_result_backend
 
+
 class RedisResultBackend:
     def __init__(self, redis):
         self._redis = redis
@@ -388,6 +406,7 @@ class RedisResultBackend:
 
     async def release_inflight(self, key: str) -> None:
         await self._redis.delete(key)
+
 
 app.dependency_overrides[get_result_backend] = lambda: RedisResultBackend(redis)
 ```
@@ -469,6 +488,7 @@ client.put("/v1/joblib/rooms/@global/jobs", json={...})
 # 2. Join the job's socketio room
 await sio.emit(JoinJobRoom(job_name="@global:modifiers:Rotate", worker_id="..."))
 
+
 # 3. Receive TaskAvailable when tasks are submitted
 @sio.on(TaskAvailable)
 async def on_task_available(sid: str, data: TaskAvailable):
@@ -481,6 +501,7 @@ When a worker's Socket.IO connection drops, the host app can immediately clean u
 
 ```python
 from zndraw_joblib import cleanup_worker, emit
+
 
 @tsio.on("disconnect")
 async def on_disconnect(sid: str, reason: str):

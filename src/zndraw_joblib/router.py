@@ -3,7 +3,7 @@ import asyncio
 import logging
 import random
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -609,7 +609,7 @@ async def submit_task(
             )
         except Exception:
             task.status = TaskStatus.FAILED
-            task.completed_at = datetime.now(timezone.utc)
+            task.completed_at = datetime.now(UTC)
             task.error = "Failed to dispatch to internal executor"
             await session.commit()
             await session.refresh(task)
@@ -816,7 +816,7 @@ async def update_task_status(
 
     # Update status
     task.status = request.status
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if request.status == TaskStatus.RUNNING:
         task.started_at = now
@@ -891,7 +891,7 @@ async def worker_heartbeat(
     if worker.user_id != user.id:
         raise Forbidden.exception(detail="Worker belongs to different user")
 
-    worker.last_heartbeat = datetime.now(timezone.utc)
+    worker.last_heartbeat = datetime.now(UTC)
     session.add(worker)
     await session.commit()
     await session.refresh(worker)

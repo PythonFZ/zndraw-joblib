@@ -131,11 +131,11 @@ from zndraw_joblib.sweeper import (
 And add `"cleanup_worker"` to the `__all__` list in the `# Sweeper` section:
 
 ```python
-    # Sweeper
-    "run_sweeper",
-    "cleanup_stale_workers",
-    "cleanup_stuck_internal_tasks",
-    "cleanup_worker",
+# Sweeper
+("run_sweeper",)
+("cleanup_stale_workers",)
+("cleanup_stuck_internal_tasks",)
+("cleanup_worker",)
 ```
 
 **Step 4: Run full test suite to verify nothing broke**
@@ -201,8 +201,12 @@ def test_job_manager_register_emits_join_for_each_job(client):
     assert mock_tsio.emit.call_count == 2
     events = [call[0][0] for call in mock_tsio.emit.call_args_list]
     worker_id = str(manager.worker_id)
-    assert events[0] == JoinJobRoom(job_name="@global:modifiers:Job1", worker_id=worker_id)
-    assert events[1] == JoinJobRoom(job_name="@global:selections:Job2", worker_id=worker_id)
+    assert events[0] == JoinJobRoom(
+        job_name="@global:modifiers:Job1", worker_id=worker_id
+    )
+    assert events[1] == JoinJobRoom(
+        job_name="@global:selections:Job2", worker_id=worker_id
+    )
 ```
 
 Update `test_job_manager_register_room_emits_correct_job_name`:
@@ -234,12 +238,8 @@ Expected: FAIL — `worker_id` missing from emitted events.
 In `src/zndraw_joblib/client.py`, change line 183:
 
 ```python
-        if self.tsio is not None:
-            self.tsio.emit(
-                JoinJobRoom(
-                    job_name=full_name, worker_id=str(self._worker_id)
-                )
-            )
+if self.tsio is not None:
+    self.tsio.emit(JoinJobRoom(job_name=full_name, worker_id=str(self._worker_id)))
 ```
 
 **Step 4: Run tests to verify they pass**
@@ -347,6 +347,7 @@ def test_job_manager_context_manager(client):
     api = MockClientApi(client)
 
     with JobManager(api, tsio=mock_tsio) as manager:
+
         @manager.register
         class CtxJob(ConcreteExtension):
             category: ClassVar[Category] = Category.MODIFIER
@@ -379,36 +380,36 @@ from zndraw_joblib.events import JoinJobRoom, LeaveJobRoom
 Add these methods to `JobManager` after the existing `__iter__` method (after line 98):
 
 ```python
-    def __enter__(self) -> "JobManager":
-        return self
+def __enter__(self) -> "JobManager":
+    return self
 
-    def __exit__(self, *exc_info) -> None:
-        self.disconnect()
 
-    def disconnect(self) -> None:
-        """Gracefully disconnect the worker.
+def __exit__(self, *exc_info) -> None:
+    self.disconnect()
 
-        1. Emits LeaveJobRoom for each registered job (socket room cleanup)
-        2. Calls DELETE /workers/{worker_id} (DB cleanup: fail tasks, remove links, soft-delete orphan jobs)
-        3. Clears local registry state
-        """
-        if self.tsio is not None and self._worker_id is not None:
-            for job_name in self._registry:
-                self.tsio.emit(
-                    LeaveJobRoom(
-                        job_name=job_name, worker_id=str(self._worker_id)
-                    )
-                )
 
-        if self._worker_id is not None:
-            resp = self.api.http.delete(
-                f"{self.api.base_url}/v1/joblib/workers/{self._worker_id}",
-                headers=self.api.get_headers(),
+def disconnect(self) -> None:
+    """Gracefully disconnect the worker.
+
+    1. Emits LeaveJobRoom for each registered job (socket room cleanup)
+    2. Calls DELETE /workers/{worker_id} (DB cleanup: fail tasks, remove links, soft-delete orphan jobs)
+    3. Clears local registry state
+    """
+    if self.tsio is not None and self._worker_id is not None:
+        for job_name in self._registry:
+            self.tsio.emit(
+                LeaveJobRoom(job_name=job_name, worker_id=str(self._worker_id))
             )
-            resp.raise_for_status()
 
-        self._registry.clear()
-        self._worker_id = None
+    if self._worker_id is not None:
+        resp = self.api.http.delete(
+            f"{self.api.base_url}/v1/joblib/workers/{self._worker_id}",
+            headers=self.api.get_headers(),
+        )
+        resp.raise_for_status()
+
+    self._registry.clear()
+    self._worker_id = None
 ```
 
 **Step 4: Run tests to verify they pass**
@@ -451,6 +452,7 @@ async def handle_join(sid: str, data: JoinJobRoom):
     session = await tsio.get_session(sid)
     session["worker_id"] = data.worker_id
     await tsio.save_session(sid, session)
+
 
 @tsio.on(LeaveJobRoom)
 async def handle_leave(sid: str, data: LeaveJobRoom):
@@ -506,6 +508,7 @@ Also update the Client usage example at the bottom of the README to show the con
 ```python
 # Context manager for automatic cleanup
 with JobManager(api, tsio=tsio) as manager:
+
     @manager.register
     class Rotate(Extension):
         category: ClassVar[Category] = Category.MODIFIER

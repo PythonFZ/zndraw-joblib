@@ -51,7 +51,9 @@ Add to `tests/test_exceptions.py`:
 def test_internal_job_not_configured_problem():
     from zndraw_joblib.exceptions import InternalJobNotConfigured
 
-    problem = InternalJobNotConfigured.create(detail="Job '@internal:modifiers:Rotate' not configured")
+    problem = InternalJobNotConfigured.create(
+        detail="Job '@internal:modifiers:Rotate' not configured"
+    )
     assert problem.status == 503
     assert problem.title == "Service Unavailable"
     assert problem.type == "/v1/problems/internal-job-not-configured"
@@ -205,7 +207,9 @@ async def mock_executor(
 
 def test_register_internal_tasks_returns_registry():
     broker = make_mock_broker()
-    registry = register_internal_tasks(broker, [FakeRotate, FakeScale], executor=mock_executor)
+    registry = register_internal_tasks(
+        broker, [FakeRotate, FakeScale], executor=mock_executor
+    )
 
     assert isinstance(registry, InternalRegistry)
     assert "@internal:modifiers:Rotate" in registry.tasks
@@ -324,8 +328,12 @@ def register_internal_tasks(
         name = ext_cls.__name__
         full_name = f"@internal:{category}:{name}"
 
-        def _make_task_fn(cls: type[Extension] = ext_cls, ex: InternalExecutor = executor):
-            async def _execute(task_id: str, room_id: str, payload: dict, base_url: str) -> None:
+        def _make_task_fn(
+            cls: type[Extension] = ext_cls, ex: InternalExecutor = executor
+        ):
+            async def _execute(
+                task_id: str, room_id: str, payload: dict, base_url: str
+            ) -> None:
                 await ex(cls, payload, room_id, task_id, base_url)
 
             return _execute
@@ -450,12 +458,16 @@ async def test_register_internal_jobs_creates_db_rows(async_session_factory):
     app = MagicMock()
     app.state = MagicMock()
 
-    await register_internal_jobs(app, broker, [FakeRotate, FakeScale], executor=mock_executor, session_factory=async_session_factory)
+    await register_internal_jobs(
+        app,
+        broker,
+        [FakeRotate, FakeScale],
+        executor=mock_executor,
+        session_factory=async_session_factory,
+    )
 
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(Job).where(Job.room_id == "@internal")
-        )
+        result = await session.execute(select(Job).where(Job.room_id == "@internal"))
         jobs = result.scalars().all()
 
     assert len(jobs) == 2
@@ -473,7 +485,13 @@ async def test_register_internal_jobs_sets_app_state(async_session_factory):
     app = MagicMock()
     app.state = MagicMock()
 
-    await register_internal_jobs(app, broker, [FakeRotate], executor=mock_executor, session_factory=async_session_factory)
+    await register_internal_jobs(
+        app,
+        broker,
+        [FakeRotate],
+        executor=mock_executor,
+        session_factory=async_session_factory,
+    )
 
     assert hasattr(app.state, "internal_registry")
     registry = app.state.internal_registry
@@ -487,7 +505,13 @@ async def test_register_internal_jobs_reactivates_deleted(async_session_factory)
 
     # First: create a deleted job manually
     async with async_session_factory() as session:
-        job = Job(room_id="@internal", category="modifiers", name="Rotate", schema_={}, deleted=True)
+        job = Job(
+            room_id="@internal",
+            category="modifiers",
+            name="Rotate",
+            schema_={},
+            deleted=True,
+        )
         session.add(job)
         await session.commit()
 
@@ -495,7 +519,13 @@ async def test_register_internal_jobs_reactivates_deleted(async_session_factory)
     app = MagicMock()
     app.state = MagicMock()
 
-    await register_internal_jobs(app, broker, [FakeRotate], executor=mock_executor, session_factory=async_session_factory)
+    await register_internal_jobs(
+        app,
+        broker,
+        [FakeRotate],
+        executor=mock_executor,
+        session_factory=async_session_factory,
+    )
 
     async with async_session_factory() as session:
         result = await session.execute(
@@ -536,6 +566,7 @@ Add to `tests/test_dependencies.py`:
 ```python
 def test_get_internal_registry_import():
     from zndraw_joblib.dependencies import get_internal_registry
+
     assert callable(get_internal_registry)
 ```
 
@@ -633,9 +664,7 @@ def validate_room_id(room_id: str) -> None:
 In `src/zndraw_joblib/router.py`, replace the `_resolve_job` function:
 
 ```python
-async def _resolve_job(
-    session: AsyncSession, job_name: str, room_id: str
-) -> Job:
+async def _resolve_job(session: AsyncSession, job_name: str, room_id: str) -> Job:
     parts = job_name.split(":", 2)
     if len(parts) != 3:
         raise JobNotFound.exception(detail=f"Invalid job name format: {job_name}")
@@ -669,11 +698,13 @@ async def _resolve_job(
 In `src/zndraw_joblib/router.py`, update `list_jobs` base_filter:
 
 ```python
-    base_filter = (
-        Job.room_id == "@global" if room_id == "@global"
-        else Job.room_id == "@internal" if room_id == "@internal"
-        else (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
-    )
+base_filter = (
+    Job.room_id == "@global"
+    if room_id == "@global"
+    else Job.room_id == "@internal"
+    if room_id == "@internal"
+    else (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
+)
 ```
 
 **Step 6: Update list_workers_for_room similarly**
@@ -681,11 +712,13 @@ In `src/zndraw_joblib/router.py`, update `list_jobs` base_filter:
 In `src/zndraw_joblib/router.py`, update `list_workers_for_room` base_filter:
 
 ```python
-    base_filter = (
-        Job.room_id == "@global" if room_id == "@global"
-        else Job.room_id == "@internal" if room_id == "@internal"
-        else (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
-    )
+base_filter = (
+    Job.room_id == "@global"
+    if room_id == "@global"
+    else Job.room_id == "@internal"
+    if room_id == "@internal"
+    else (Job.room_id.in_(["@global", "@internal"])) | (Job.room_id == room_id)
+)
 ```
 
 **Step 7: Update register_job to require superuser for @internal**
@@ -693,9 +726,11 @@ In `src/zndraw_joblib/router.py`, update `list_workers_for_room` base_filter:
 In `src/zndraw_joblib/router.py`, update the admin check in `register_job`:
 
 ```python
-    # Check admin for @global and @internal
-    if room_id in ("@global", "@internal") and not user.is_superuser:
-        raise Forbidden.exception(detail="Admin required for @global/@internal job registration")
+# Check admin for @global and @internal
+if room_id in ("@global", "@internal") and not user.is_superuser:
+    raise Forbidden.exception(
+        detail="Admin required for @global/@internal job registration"
+    )
 ```
 
 **Step 8: Run all tests**
@@ -827,7 +862,12 @@ from zndraw_joblib.exceptions import (
 Add dependency import:
 
 ```python
-from zndraw_joblib.dependencies import get_settings, get_locked_async_session, get_session_factory, get_internal_registry
+from zndraw_joblib.dependencies import (
+    get_settings,
+    get_locked_async_session,
+    get_session_factory,
+    get_internal_registry,
+)
 from zndraw_joblib.registry import InternalRegistry
 ```
 
@@ -942,13 +982,12 @@ async def test_cleanup_stuck_internal_tasks(async_session_factory):
         task_id = task.id
 
     async with async_session_factory() as session:
-        count = await cleanup_stuck_internal_tasks(
-            session, timeout=timedelta(hours=1)
-        )
+        count = await cleanup_stuck_internal_tasks(session, timeout=timedelta(hours=1))
         assert count == 1
 
     async with async_session_factory() as session:
         from sqlalchemy import select
+
         result = await session.execute(select(Task).where(Task.id == task_id))
         task = result.scalar_one()
         assert task.status == TaskStatus.FAILED
@@ -974,9 +1013,7 @@ async def test_cleanup_stuck_internal_tasks_skips_recent(async_session_factory):
         await session.commit()
 
     async with async_session_factory() as session:
-        count = await cleanup_stuck_internal_tasks(
-            session, timeout=timedelta(hours=1)
-        )
+        count = await cleanup_stuck_internal_tasks(session, timeout=timedelta(hours=1))
         assert count == 0
 
 
@@ -997,9 +1034,7 @@ async def test_cleanup_stuck_skips_external_tasks(async_session_factory):
         await session.commit()
 
     async with async_session_factory() as session:
-        count = await cleanup_stuck_internal_tasks(
-            session, timeout=timedelta(hours=1)
-        )
+        count = await cleanup_stuck_internal_tasks(session, timeout=timedelta(hours=1))
         assert count == 0
 ```
 
@@ -1131,6 +1166,7 @@ def test_internal_registry_exports():
         InternalRegistry,
         InternalJobNotConfigured,
     )
+
     assert callable(register_internal_jobs)
     assert callable(register_internal_tasks)
 ```
@@ -1162,22 +1198,26 @@ from zndraw_joblib.exceptions import InternalJobNotConfigured
 Add to `__all__`:
 
 ```python
-    # Internal registry
-    "register_internal_jobs",
-    "register_internal_tasks",
-    "InternalExecutor",
-    "InternalRegistry",
-    "InternalJobNotConfigured",
+# Internal registry
+("register_internal_jobs",)
+("register_internal_tasks",)
+("InternalExecutor",)
+("InternalRegistry",)
+("InternalJobNotConfigured",)
 ```
 
 Also add `cleanup_stuck_internal_tasks` to the sweeper imports and __all__:
 
 ```python
-from zndraw_joblib.sweeper import run_sweeper, cleanup_stale_workers, cleanup_stuck_internal_tasks
+from zndraw_joblib.sweeper import (
+    run_sweeper,
+    cleanup_stale_workers,
+    cleanup_stuck_internal_tasks,
+)
 ```
 
 ```python
-    "cleanup_stuck_internal_tasks",
+("cleanup_stuck_internal_tasks",)
 ```
 
 **Step 4: Run all tests**

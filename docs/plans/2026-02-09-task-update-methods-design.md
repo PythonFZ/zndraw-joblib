@@ -16,11 +16,14 @@ Methods live on `JobManager` (not `ClaimedTask`) per Single Responsibility:
 def start(self, task: ClaimedTask) -> None:
     """Transition task from CLAIMED to RUNNING."""
 
+
 def complete(self, task: ClaimedTask) -> None:
     """Transition task from RUNNING to COMPLETED."""
 
+
 def fail(self, task: ClaimedTask, error: str) -> None:
     """Transition task from RUNNING to FAILED with error message."""
+
 
 def cancel(self, task: ClaimedTask) -> None:
     """Transition task from CLAIMED or RUNNING to CANCELLED."""
