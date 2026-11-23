@@ -76,6 +76,7 @@ async def create_job(session: Annotated[AsyncSession, Depends(get_locked_async_s
 # routes.py
 from zndraw_auth.db import SessionDep
 
+
 @router.post("/jobs")
 async def create_job(session: SessionDep):
     # Uses auth's dependency directly
@@ -135,6 +136,7 @@ def get_session_factory(session_maker):
     async def create_session():
         async with session_maker() as session:
             yield session
+
     return create_session
 ```
 
@@ -143,9 +145,10 @@ def get_session_factory(session_maker):
 # Just use session_maker directly!
 from zndraw_auth.db import get_session_maker
 
+
 @router.get("/tasks/poll")
 async def poll_tasks(
-    session_maker: Annotated[async_sessionmaker, Depends(get_session_maker)]
+    session_maker: Annotated[async_sessionmaker, Depends(get_session_maker)],
 ):
     # Create multiple sessions in loop
     while True:
@@ -169,13 +172,16 @@ async def poll_tasks(
 # zndraw_joblib/models.py
 from zndraw_auth import Base
 
+
 class Job(Base):
     __tablename__ = "job"
     # All Job fields...
 
+
 class Worker(Base):
     __tablename__ = "worker"
     # All Worker fields...
+
 
 class Task(Base):
     __tablename__ = "task"
@@ -194,14 +200,15 @@ from zndraw_joblib.dependencies import get_locked_async_session
 
 LockedSessionDep = Annotated[AsyncSession, Depends(get_locked_async_session)]
 
+
 @router.post("/jobs")
-async def create_job(session: LockedSessionDep):
-    ...
+async def create_job(session: LockedSessionDep): ...
 ```
 
 ### After
 ```python
 from zndraw_auth.db import SessionDep
+
 
 @router.post("/jobs")
 async def create_job(session: SessionDep):
@@ -287,11 +294,13 @@ app.dependency_overrides[get_session_maker] = lambda: test_maker
 base_maker = async_sessionmaker(test_engine)
 db_lock = asyncio.Lock()
 
+
 @asynccontextmanager
 async def locked_test_maker():
     async with db_lock:
         async with base_maker() as session:
             yield session
+
 
 # Override with locked version
 app.dependency_overrides[get_session_maker] = lambda: locked_test_maker

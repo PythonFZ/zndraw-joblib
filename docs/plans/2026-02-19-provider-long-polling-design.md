@@ -112,6 +112,7 @@ With `ignore_subscribe_messages=True`, only actual published messages are return
 ```python
 NOTIFY_PREFIX = "notify:"
 
+
 async def wait_for_key(self, key: str, timeout: float) -> bytes | None:
     channel = f"{NOTIFY_PREFIX}{key}"
     async with self._redis.pubsub() as pubsub:
@@ -124,13 +125,12 @@ async def wait_for_key(self, key: str, timeout: float) -> bytes | None:
             return cached
 
         # Single await — get_message natively blocks up to timeout seconds.
-        msg = await pubsub.get_message(
-            ignore_subscribe_messages=True, timeout=timeout
-        )
+        msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=timeout)
         if msg is not None:
             return await self.get(key)
 
         return None
+
 
 async def notify_key(self, key: str) -> None:
     await self._redis.publish(f"{NOTIFY_PREFIX}{key}", b"1")
@@ -149,12 +149,11 @@ async def wait_for_key(self, key: str, timeout: float) -> bytes | None:
         cached = await self.get(key)  # routes via _backend_for()
         if cached is not None:
             return cached
-        msg = await pubsub.get_message(
-            ignore_subscribe_messages=True, timeout=timeout
-        )
+        msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=timeout)
         if msg is not None:
             return await self.get(key)  # routes via _backend_for()
         return None
+
 
 async def notify_key(self, key: str) -> None:
     await self._redis.notify_key(key)  # always Redis
@@ -167,6 +166,7 @@ Does not support pub/sub (same as inflight locks):
 ```python
 async def wait_for_key(self, key: str, timeout: float) -> bytes | None:
     raise NotImplementedError("Use CompositeResultBackend for long-polling")
+
 
 async def notify_key(self, key: str) -> None:
     raise NotImplementedError("Use CompositeResultBackend for long-polling")
@@ -233,14 +233,16 @@ async def read_provider(
         provider_room = f"providers:{provider.full_name}"
         await emit(
             tsio,
-            {Emission(
-                ProviderRequest.from_dict_params(
-                    request_id=rhash,
-                    provider_name=provider.full_name,
-                    params=params,
-                ),
-                provider_room,
-            )},
+            {
+                Emission(
+                    ProviderRequest.from_dict_params(
+                        request_id=rhash,
+                        provider_name=provider.full_name,
+                        params=params,
+                    ),
+                    provider_room,
+                )
+            },
         )
 
     # 3. Long-poll: wait for result via Redis pub/sub
@@ -393,14 +395,19 @@ async def _await_provider_frame(
     acquired = await result_backend.acquire_inflight(inflight_key, inflight_ttl)
     if acquired:
         provider_room = f"providers:{provider.full_name}"
-        await joblib_emit(sio, {Emission(
-            ProviderRequest.from_dict_params(
-                request_id=rhash,
-                provider_name=provider.full_name,
-                params=params,
-            ),
-            provider_room,
-        )})
+        await joblib_emit(
+            sio,
+            {
+                Emission(
+                    ProviderRequest.from_dict_params(
+                        request_id=rhash,
+                        provider_name=provider.full_name,
+                        params=params,
+                    ),
+                    provider_room,
+                )
+            },
+        )
 
     # Long-poll — no DB resources held
     result = await result_backend.wait_for_key(cache_key, timeout)
