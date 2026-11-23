@@ -91,7 +91,8 @@ else:
     data = result  # assumed bytes
 
 resp = self.api.http.post(
-    url, content=data,
+    url,
+    content=data,
     headers={**self.api.get_headers(), "X-Request-Hash": event.request_id},
 )
 ```
